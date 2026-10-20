@@ -321,6 +321,25 @@ def _drop_tool_results(
     return len(items)
 
 
+def _session_origin(payload: dict[str, Any]) -> str:
+    source = payload.get("source")
+    sub = source.get("subagent") if isinstance(source, dict) else None
+    if (
+        isinstance(sub, str) and sub in {"review", "compact", "memory_consolidation"}
+        or isinstance(sub, dict) and (
+            isinstance(sub.get("thread_spawn"), dict) or isinstance(sub.get("other"), str)
+        )
+    ):
+        return "codex_subagent_source"
+    # Native Codex hierarchy only: entry sources do not rule out external orchestrators.
+    if (
+        isinstance(source, str) and source in {"cli", "vscode", "exec"}
+        and "parent_thread_id" not in payload and "subagent" not in payload
+    ):
+        return "codex_top_level_source"
+    return "unknown"
+
+
 def extract_codex_session(
     session_file: Path,
     *,
@@ -342,6 +361,8 @@ def extract_codex_session(
     explicit_parent_session_id: str | None = None
     seen_session_meta = False
     is_subagent_file = False
+    origins_by_session: dict[str, set[str]] = {}
+    contradictory_origin_sessions: set[str] = set()
     current_turn_id: str | None = None
     current_model: str | None = None
     current_cwd: str | None = None
@@ -408,6 +429,12 @@ def extract_codex_session(
 
             if top_type == "session_meta":
                 meta_id = payload.get("id")
+                origin = _session_origin(payload)
+                if isinstance(meta_id, str) and meta_id:
+                    if origin != "unknown":
+                        origins_by_session.setdefault(f"codex:{meta_id}", set()).add(origin)
+                    elif "parent_thread_id" in payload or "subagent" in payload:
+                        contradictory_origin_sessions.add(f"codex:{meta_id}")
                 if not seen_session_meta:
                     seen_session_meta = True
                     source = payload.get("source")
@@ -931,6 +958,15 @@ def extract_codex_session(
                 inputs_since_close = 0
                 segment_timing_events = []
                 segment_tools = []
+
+    # Reconcile all metadata, including evidence arriving after a session's first round.
+    for round_obj in rounds:
+        origins = origins_by_session.get(round_obj["session_id"], set())
+        round_obj["session_origin"] = (
+            next(iter(origins))
+            if len(origins) == 1 and round_obj["session_id"] not in contradictory_origin_sessions
+            else "unknown"
+        )
 
     # Private extraction-only runner ids/provenance must not enter the normalized schema.
     for tool in tool_by_id.values():

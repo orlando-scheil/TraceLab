@@ -16,7 +16,48 @@ drops) them, so a sanitized row legitimately still carries a pseudonymous ``user
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from typing import Any
+
+SESSION_ORIGINS = frozenset({
+    "claude_top_level_layout", "claude_subagent_layout",
+    "codex_top_level_source", "codex_subagent_source", "unknown",
+})
+_SCOPE_RE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+
+
+def invalid_lineage_marker(key: str, value: Any) -> bool:
+    if key == "session_origin":
+        return not isinstance(value, str) or value not in SESSION_ORIGINS
+    if key == "identity_scope_id":
+        return not isinstance(value, str) or _SCOPE_RE.fullmatch(value) is None
+    return False
+
+
+class LineageMarkerValidator:
+    """Check original candidates, including rows that dedup would discard."""
+
+    def __init__(self) -> None:
+        self.scope: str | None = None
+        self.seen = False
+
+    def add(self, row: dict[str, Any]) -> None:
+        for key in ("session_origin", "identity_scope_id"):
+            if key in row and invalid_lineage_marker(key, row[key]):
+                raise ValueError(f"invalid {key}")
+        scope = row.get("identity_scope_id")
+        if self.seen and scope != self.scope:
+            raise ValueError("identity_scope_id must be identical on all rows; marked/unmarked mixing is not allowed")
+        self.scope = scope
+        self.seen = True
+
+
+def validate_lineage_markers(rows: Iterable[dict[str, Any]]) -> str | None:
+    validator = LineageMarkerValidator()
+    for row in rows:
+        validator.add(row)
+    return validator.scope
 
 USER_KEYS = {
     "user",
@@ -57,7 +98,7 @@ def _scan(value: Any, path: str, out: list[str]) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = f"{path}.{key}" if path else str(key)
-            if isinstance(key, str) and is_sensitive_key(key):
+            if isinstance(key, str) and (is_sensitive_key(key) or invalid_lineage_marker(key, child)):
                 out.append(child_path)
                 continue
             _scan(child, child_path, out)
@@ -70,7 +111,7 @@ def _has_sensitive_key(value: Any) -> bool:
     """Fast boolean twin of :func:`_scan` — no path strings. Used on the validation hot path."""
     if isinstance(value, dict):
         for key, child in value.items():
-            if isinstance(key, str) and is_sensitive_key(key):
+            if isinstance(key, str) and (is_sensitive_key(key) or invalid_lineage_marker(key, child)):
                 return True
             if _has_sensitive_key(child):
                 return True

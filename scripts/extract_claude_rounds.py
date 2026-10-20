@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from trace_privacy import LineageMarkerValidator
+
 
 def parse_ts(value: str | None) -> datetime | None:
     if not value:
@@ -210,6 +212,14 @@ def write_rounds_jsonl(
     # When ``written_sink`` is given, each row actually written (after the trace_key stamp + de-dup) is
     # appended to it, so a caller can reuse the exact deduped rows without re-parsing the file it just
     # wrote. The CLIs pass nothing (unaffected); ingest.prepare uses it to skip a ~3.7 s reload.
+    markers = LineageMarkerValidator()
+    if append_dedup and path.exists():
+        with path.open("r", encoding="utf-8") as existing:
+            for line in existing:
+                if line.strip():
+                    markers.add(json.loads(line))
+    for row in rounds:
+        markers.add(row)
     existing_keys = load_existing_round_keys(path) if append_dedup else set()
     mode = "a" if append_dedup else "w"
     written = 0
@@ -363,6 +373,7 @@ def extract_session_with_key(
     *,
     raw_sink: dict[str, Any] | None = None,
     title_sink: dict[str, str] | None = None,
+    project_layout: bool = False,
 ) -> list[dict[str, Any]]:
     """Extract one session's rounds.
 
@@ -372,6 +383,9 @@ def extract_session_with_key(
     into the round dict, so with both ``None`` (the CLI / contribute default) behavior — and the
     normalized/sanitized output — is unchanged. The raw map stays on the local machine and must
     NEVER enter a sanitized/contributed/uploadable artifact.
+
+    ``project_layout`` is caller evidence of a retained projects/<project>/ relative layout;
+    an arbitrary detached filename is not evidence of a top-level session.
     """
     rounds: list[dict[str, Any]] = []
     by_msg_id: dict[str, dict[str, Any]] = {}
@@ -380,8 +394,10 @@ def extract_session_with_key(
     session_id = f"claude:{session_key}"
     parent_session_id = None
     root_session_id = None
+    session_origin = "unknown"
     match = re.fullmatch(r"([^/]+)/subagents/(agent-[^/]+)", session_key)
     if match:
+        session_origin = "claude_subagent_layout"
         root_session_id = f"claude:{match[1]}"
         try:
             meta = json.loads(session_file.with_suffix(".meta.json").read_text(encoding="utf-8"))
@@ -393,6 +409,8 @@ def extract_session_with_key(
             candidate = f"claude:{match[1]}/subagents/{parent}"
             if candidate != session_id:
                 parent_session_id = candidate
+    elif project_layout and session_file.suffix == ".jsonl" and re.fullmatch(r"[^/]+", session_key):
+        session_origin = "claude_top_level_layout"
     # Opt-in raw capture state (parallel to the round-building state above; never merged into it).
     raw_by_msg_id: dict[str, dict[str, Any]] = {}
     raw_tool_by_id: dict[str, dict[str, Any]] = {}
@@ -584,6 +602,7 @@ def extract_session_with_key(
                         pending_raw_in.append({"kind": "user", "text": _raw_text(content)})
 
     for index, round_obj in enumerate(rounds):
+        round_obj["session_origin"] = session_origin
         round_obj["parent_session_id"] = parent_session_id
         round_obj["root_session_id"] = root_session_id
         round_obj["round_index"] = index
@@ -633,7 +652,10 @@ def main() -> int:
     all_rounds: list[dict[str, Any]] = []
     for session_file in session_files:
         session_key = str(session_file.relative_to(project_dir).with_suffix(""))
-        all_rounds.extend(extract_session_with_key(session_file, project, session_key))
+        all_rounds.extend(extract_session_with_key(
+            session_file, project, session_key,
+            project_layout=project_dir.parent.name == "projects",
+        ))
 
     write_stats = write_rounds_jsonl(args.output, all_rounds, append_dedup=args.append_dedup)
 
