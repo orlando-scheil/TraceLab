@@ -108,6 +108,7 @@ export const uiCopy = {
         prefix_cache: 'prefix_cache',
         human_in_the_loop: 'human_in_the_loop',
         session: 'session',
+        subagents: 'subagents',
       },
       sections: {
         tool_calls: {
@@ -129,6 +130,10 @@ export const uiCopy = {
         session: {
           title: 'Session',
           description: 'Session-level context, cost, timing, compaction, and human waits across a full agent session.',
+        },
+        subagents: {
+          title: 'Subagents',
+          description: 'Claude and Codex subagent adoption, workload, tokens, and tools, with coverage and missing evidence shown.',
         },
       },
       cards: {} as Record<string, { title: string; blurb: string }>,
@@ -713,6 +718,7 @@ export const uiCopy = {
         prefix_cache: '前缀缓存',
         human_in_the_loop: '人机协作',
         session: '会话上下文',
+        subagents: '子智能体',
       },
       sections: {
         tool_calls: {
@@ -735,8 +741,28 @@ export const uiCopy = {
           title: '会话',
           description: '会话级上下文、成本、耗时、压缩和人类等待，贯穿整个智能体会话。',
         },
+        subagents: {
+          title: '子智能体',
+          description: '比较 Claude 与 Codex 子智能体的使用、工作负载、token 和工具，并展示覆盖范围与缺失证据。',
+        },
       },
       cards: {
+        'Subagent adoption': {
+          title: '子智能体使用情况',
+          blurb: '比较 Claude 与 Codex 中观测到的委派、会话家族规模、嵌套和关联覆盖范围。',
+        },
+        'Subagent workload': {
+          title: '子智能体工作负载',
+          blurb: '比较 Claude 与 Codex 中配对的主会话和后代会话的轮次及工具调用。',
+        },
+        'Subagent tokens and reports': {
+          title: '子智能体 token 与报告',
+          blurb: '比较 Claude 与 Codex 记录的输入和输出，以及与报告相关的上下文变化，并展示证据覆盖范围。',
+        },
+        'Subagent tool usage': {
+          title: '子智能体工具使用',
+          blurb: '比较 Claude 与 Codex 的工具调用构成、已知结果错误率、工具种类数和累加工具耗时。',
+        },
         'Tool latency distribution': {
           title: '工具延迟分布',
           blurb: '每次工具调用延迟的累计分布。',

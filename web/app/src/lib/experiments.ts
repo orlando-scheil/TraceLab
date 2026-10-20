@@ -4,6 +4,7 @@
 //
 // Order follows the TraceLab paper: Session → LLM generation → Tool calls → Prefix cache. This
 // drives the detail page's experiment-nav grouping and the prev/next navigation.
+// Subagents extends Session before LLM generation; existing paper entries keep their order.
 
 export interface ExperimentFigure {
   src: string;
@@ -118,6 +119,69 @@ export const experiments: Experiment[] = [
       { src: '/figures/human_in_the_loop/human_input_wait_cdf.png', caption: 'Human input wait CDF.' },
       { src: '/figures/human_in_the_loop/human_input_wait_count_cdf_by_provider.png', caption: 'Human wait count CDF by provider.' },
       { src: '/figures/human_in_the_loop/human_input_wait_total_cdf_by_provider.png', caption: 'Human wait total-time CDF by provider.' },
+    ],
+  },
+
+  // ----- Subagents (provider comparisons and measured coverage) -----
+  {
+    slug: 'subagents/adoption',
+    category: 'subagents',
+    title: 'Subagent adoption',
+    blurb: 'Claude vs Codex observed delegation, family size, nesting, and linkage coverage.',
+    readme: 'artifacts/subagents/adoption/README.md',
+    figures: [],
+    tables: [
+      {
+        src: 'artifacts/subagents/adoption/adoption.md',
+        caption: 'Claude and Codex observed adoption, descendants, direct children, nesting, and depth, with eligibility and linkage coverage.',
+      },
+    ],
+  },
+  {
+    slug: 'subagents/workload',
+    category: 'subagents',
+    title: 'Subagent workload',
+    blurb: 'Claude vs Codex rounds and tool calls in matched main and descendant sessions.',
+    readme: 'artifacts/subagents/workload/README.md',
+    figures: [],
+    tables: [
+      {
+        src: 'artifacts/subagents/workload/workload.md',
+        caption: 'Claude and Codex main/descendant rounds and tool calls per session, zero-tool and one-round shares, and calls per round, with cohort coverage.',
+      },
+    ],
+  },
+  {
+    slug: 'subagents/tokens_and_reports',
+    category: 'subagents',
+    title: 'Subagent tokens and reports',
+    blurb: 'Claude vs Codex recorded input/output and report-associated context changes, with evidence coverage.',
+    readme: 'artifacts/subagents/tokens_and_reports/README.md',
+    figures: [],
+    tables: [
+      {
+        src: 'artifacts/subagents/tokens_and_reports/tokens_and_reports.md',
+        caption: 'Claude and Codex recorded input/output, first and peak input, and report-associated context changes. Claude candidates and supported Codex receipts stay separate; these are not exact report-body token counts.',
+      },
+    ],
+  },
+  {
+    slug: 'subagents/tool_usage',
+    category: 'subagents',
+    title: 'Subagent tool usage',
+    blurb: 'Claude vs Codex tool mix, known-outcome errors, diversity, and additive tool time.',
+    readme: 'artifacts/subagents/tool_usage/README.md',
+    figures: [
+      {
+        src: '/figures/subagents/tool_usage.png',
+        caption: 'Claude and Codex main/descendant call shares and positive effective tool time for a shared tool list. Time is additive, not elapsed; missing linked data is labeled.',
+      },
+    ],
+    tables: [
+      {
+        src: 'artifacts/subagents/tool_usage/tool_usage.md',
+        caption: 'Claude and Codex complete tool counts, known-outcome error rates and coverage, distinct named tools per session, and additive positive tool time, by role.',
+      },
     ],
   },
 

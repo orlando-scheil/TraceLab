@@ -75,11 +75,12 @@ const tables = (
 const sec = T.figures.sections as Record<string, { title: string }>;
 const categoryLabels: Record<string, string> = {
   session: sec.session?.title ?? 'Session',
+  subagents: sec.subagents?.title ?? 'Subagents',
   llm_generation: sec.llm_generation?.title ?? 'LLM generation',
   tool_calls: sec.tool_calls?.title ?? 'Tool calls',
   prefix_cache: sec.prefix_cache?.title ?? 'Prefix cache',
 };
-const categoryOrder = ['session', 'llm_generation', 'tool_calls', 'prefix_cache'];
+const categoryOrder = ['session', 'subagents', 'llm_generation', 'tool_calls', 'prefix_cache'];
 const experimentGroups = categoryOrder
   .map((category) => ({
     category,
