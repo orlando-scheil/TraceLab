@@ -77,6 +77,8 @@ dependencies; the composed modules import only from base ones.
 
 **Standalone:**
 
+- **`subagent_cohorts.py`** — shared SQL for matched main/descendant families and
+  percentile summaries that distinguish empty samples from measured zeros.
 - **`png_sidecar.py`** — fuses an experiment's README, source CSV data, and plotting
   code into its PNGs as compressed text chunks, so each figure is self-contained.
   `make_self_contained(out_dir, code_files=[Path(__file__), *png_sidecar.util_code_files()],

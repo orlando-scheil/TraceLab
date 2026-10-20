@@ -19,6 +19,7 @@ from extract_claude_rounds import (
     round_key,
     write_rounds_jsonl,
 )
+from trace_privacy import is_codex_thread_id
 
 
 EXIT_CODE_RE = re.compile(r"(?:Exit code|Process exited with code)[: ]+(-?\d+)")
@@ -126,6 +127,23 @@ def process_session_from_input(input_value: Any) -> str | None:
     return str(parsed["session_id"])
 
 
+def completed_wait_sessions(output: Any) -> list[str] | None:
+    """Legacy Codex wait status (fe439afb81c1ba9999a29e9e996ac6fca561ae4a), not mailbox readiness."""
+    parsed = tool_input_dict(output)
+    if parsed is None or not isinstance(parsed.get("timed_out"), bool):
+        return None
+    statuses = parsed.get("status")
+    if not isinstance(statuses, dict):
+        return None
+    session_ids = []
+    for child_id, status in statuses.items():
+        if isinstance(status, dict) and isinstance(status.get("completed"), str):
+            if len(status) != 1 or not is_codex_thread_id(child_id):
+                return None
+            session_ids.append(f"codex:{child_id}")
+    return session_ids or None
+
+
 def command_observation(
     output: Any,
     tool_name: str | None,
@@ -185,6 +203,8 @@ def add_tool(
         "tool_wall_latency_ms": None,
         "tool_internal_latency_ms": None,
         "is_error": None,
+        "report_source": None,
+        "report_session_ids": None,
     }
     if tool_name in PROCESS_CONTINUATION_TOOLS:
         process_session_id = process_session_from_input(input_value)
@@ -207,6 +227,16 @@ def apply_tool_output(
     explicit_exit_code: int | None = None,
     observation_source: str,
 ) -> bool:
+    if tool.get("tool_name") == "wait":
+        # Any repeated output makes receipt/consumption ambiguous, even without timestamps.
+        session_ids = (
+            completed_wait_sessions(output)
+            if tool.get("result_chars") is None
+            and observation_source == "function_call_output" and is_error is not True
+            else None
+        )
+        tool["report_source"] = "codex_wait_completed" if session_ids else None
+        tool["report_session_ids"] = session_ids
     first_result = tool.get("result_at") is None
     if first_result:
         tool["result_at"] = timestamp
@@ -682,7 +712,8 @@ def extract_codex_session(
                 tool = tool_by_id.get(call_id) if isinstance(call_id, str) else None
                 if tool is not None:
                     output = payload.get("output")
-                    is_error = infer_error_from_output(output)
+                    # A report may quote command failures; its prose is not tool-error evidence.
+                    is_error = None if tool.get("tool_name") == "wait" else infer_error_from_output(output)
                     if apply_tool_output(
                         tool,
                         timestamp,
@@ -713,7 +744,7 @@ def extract_codex_session(
                 tool = tool_by_id.get(call_id) if isinstance(call_id, str) else None
                 if tool is not None:
                     output = payload.get("output")
-                    is_error = infer_error_from_output(output)
+                    is_error = None if tool.get("tool_name") == "wait" else infer_error_from_output(output)
                     if apply_tool_output(
                         tool,
                         timestamp,

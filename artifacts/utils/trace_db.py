@@ -89,6 +89,8 @@ _TOOL_FIELDS = (
     ("executable_parse_status", "VARCHAR", "CAST(tc.executable_parse_status AS VARCHAR)"),
     ("executable_parse_reason", "VARCHAR", "CAST(tc.executable_parse_reason AS VARCHAR)"),
     ("command_skeleton", "VARCHAR", "CAST(tc.command_skeleton AS VARCHAR)"),
+    ("report_source", "VARCHAR", "CAST(tc.report_source AS VARCHAR)"),
+    ("report_session_ids", "VARCHAR[]", "CAST(tc.report_session_ids AS VARCHAR[])"),
 )
 _TIMING_FIELDS = (
     ("event_type", "VARCHAR", "te.event_type"),
@@ -629,6 +631,8 @@ def _install_compat_views(con: "duckdb.DuckDBPyConnection") -> None:
             "executable_parse_status",
             "executable_parse_reason",
             "command_skeleton",
+            "report_source",
+            "report_session_ids",
         )
         if not _has_column(con, "tool_calls", name)
     ]
@@ -671,6 +675,8 @@ def _install_compat_views(con: "duckdb.DuckDBPyConnection") -> None:
             "executable_parse_status": "CAST(NULL AS VARCHAR)",
             "executable_parse_reason": "CAST(NULL AS VARCHAR)",
             "command_skeleton": "CAST(NULL AS VARCHAR)",
+            "report_source": "CAST(NULL AS VARCHAR)",
+            "report_session_ids": "CAST(NULL AS VARCHAR[])",
         }
         additions = ", ".join(
             f"{derived[name]} AS {_ident(name)}" for name in missing

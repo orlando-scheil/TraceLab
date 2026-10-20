@@ -293,6 +293,10 @@ def sanitize_row(row: dict[str, Any], ids: StableIdSanitizer) -> dict[str, Any]:
             )
             if isinstance(original_tool_name, str):
                 tool["tool_name"] = ids.tool_name(original_tool_name)
+            if isinstance(original_tool, dict) and original_tool.get("report_session_ids") is not None:
+                tool["report_session_ids"] = [
+                    ids.session_id(provider, sid) for sid in original_tool["report_session_ids"]
+                ]
             if isinstance(original_tool, dict) and "tool_call_id" in original_tool:
                 tool["tool_call_id"] = ids.atomic_id(
                     "tool_call_id",

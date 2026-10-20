@@ -169,6 +169,37 @@ re-add as a single JSON column only if an experiment truly needs it).
 | `executable_parse_status` | VARCHAR | `success` \| `partial` \| `failed`; null for non-command tools |
 | `executable_parse_reason` | VARCHAR | short reason for partial/failed extraction, otherwise null |
 | `command_skeleton` | VARCHAR | privacy-safe executable/operator structure with arguments removed; empty when unavailable |
+| `report_source` | VARCHAR | nullable allowlist: `codex_wait_completed` (supported receipt), `claude_agent_task_result` (candidate only) |
+| `report_session_ids` | VARCHAR[] | nullable unique provider-qualified child session IDs; nonempty only for supported Codex wait receipts; uses the same sanitizer mapping as session/parent IDs |
+
+**Report evidence is not report token accounting.** The tool's owning round/session is the actual
+recipient, which may itself be a subagent, not necessarily the ultimate root. Match its existing
+`tool_call_id` to a `tool_result` timing event in the **same recipient session** to identify the
+consuming round. A received result remains on the tool even if no subsequent model round exists;
+in that case consumption and any usage change are unavailable.
+
+- `codex_wait_completed` recognizes only a paired legacy `wait` function output with JSON shape
+  `{status: {<canonical thread UUID>: {completed: <string>}, ...}, timed_out: <boolean>}` from pinned
+  Codex source `fe439afb81c1ba9999a29e9e996ac6fca561ae4a`. Only string-valued `completed`
+  entries supply child IDs. A malformed completed child ID invalidates the receipt. Running,
+  errors, null completion, and timeout without completed entries do not qualify. A timeout with
+  completed entries still carries those receipts. Spawn acknowledgements, `wait_agent` mailbox
+  readiness, and generic `task_complete` events are unsupported, not report evidence.
+- `claude_agent_task_result` marks an actual paired result of exact `Agent` / `Task` tool names
+  before anonymization. It is **candidate-only**, not confirmed completion or an exact report.
+  Child IDs remain null: no prose/agentId extraction or unproved completion metadata parsing.
+  Candidates include error results, distinguished by existing `is_error`; analysis must filter
+  known errors. Repeated outputs for either provider clear report evidence rather than choosing
+  an ambiguous receipt/consumption pairing.
+- No report body, text-derived count, token estimate, or input delta is extracted into these fields.
+  Provider-recorded round usage can support separately labeled **report-associated** context changes,
+  not exact report-only or provider-native report token counts.
+- Missing legacy fields and unsupported evidence are typed **NULL**, never zero or an empty report
+  list. Native/wasm materialization pins `VARCHAR` / `VARCHAR[]`; read-only prebuilt DBs receive
+  typed null columns in the existing temporary `tool_calls` compatibility view without file changes.
+  Sanitization, merge, and contribute validate the allowlist, provider, list shape, canonical Codex
+  IDs, and uniqueness through the existing pre-dedup lineage validator. Claude candidates require
+  null IDs; Codex receipts require a nonempty list. This validates the contract, not proof of origin.
 
 **Effective tool latency** = `internal` if present else `wall` (legacy `latency_ms` is not in the
 normalized data). Use the shared fragment `trace_db.EFFECTIVE_TOOL_LATENCY_MS_SQL`.

@@ -304,6 +304,8 @@ def add_tool_use(
         "tool_internal_latency_ms": None,
         "is_error": None,
         "result_at": None,
+        "report_source": None,
+        "report_session_ids": None,
     }
     round_obj["tools"].append(tool)
     return tool
@@ -323,6 +325,11 @@ def apply_tool_result(
         wall_latency_ms = round((finished - emitted).total_seconds() * 1000)
     internal_latency_ms = duration_ms_from_mapping(record.get("toolUseResult"))
 
+    if tool.get("tool_name") in ("Agent", "Task"):
+        # Candidate only, including errors; no completion or child identity inferred from prose.
+        tool["report_source"] = (
+            "claude_agent_task_result" if tool.get("result_chars") is None else None
+        )
     tool["result_chars"] = content_chars(block.get("content"))
     tool["tool_wall_latency_ms"] = wall_latency_ms
     tool["tool_internal_latency_ms"] = internal_latency_ms

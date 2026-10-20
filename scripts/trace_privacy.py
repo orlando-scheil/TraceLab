@@ -19,12 +19,47 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from typing import Any
+from uuid import UUID
 
 SESSION_ORIGINS = frozenset({
     "claude_top_level_layout", "claude_subagent_layout",
     "codex_top_level_source", "codex_subagent_source", "unknown",
 })
 _SCOPE_RE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+REPORT_SOURCE_PROVIDERS = {
+    "codex_wait_completed": "codex",
+    "claude_agent_task_result": "claude",
+}
+
+
+def is_codex_thread_id(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return str(UUID(value)) == value
+    except ValueError:
+        return False
+
+
+def validate_report_fields(tool: dict[str, Any], provider: Any) -> None:
+    source = tool.get("report_source")
+    session_ids = tool.get("report_session_ids")
+    if source is not None and (
+        not isinstance(source, str) or source not in REPORT_SOURCE_PROVIDERS
+        or provider != REPORT_SOURCE_PROVIDERS[source]
+    ):
+        raise ValueError("invalid report_source for provider")
+    if source == "codex_wait_completed":
+        if (
+            not isinstance(session_ids, list) or not session_ids
+            or any(not isinstance(sid, str) or not sid.startswith("codex:")
+                   or not is_codex_thread_id(sid[len("codex:"):]) for sid in session_ids)
+            or len(set(session_ids)) != len(session_ids)
+        ):
+            raise ValueError("invalid report_session_ids for codex_wait_completed")
+    elif session_ids is not None:
+        # Claude candidates have no proved child identity; legacy/unsupported evidence stays null.
+        raise ValueError("report_session_ids requires codex_wait_completed")
 
 
 def invalid_lineage_marker(key: str, value: Any) -> bool:
@@ -36,7 +71,7 @@ def invalid_lineage_marker(key: str, value: Any) -> bool:
 
 
 class LineageMarkerValidator:
-    """Check original candidates, including rows that dedup would discard."""
+    """Check lineage and report references on original candidates, even before dedup."""
 
     def __init__(self) -> None:
         self.scope: str | None = None
@@ -46,6 +81,11 @@ class LineageMarkerValidator:
         for key in ("session_origin", "identity_scope_id"):
             if key in row and invalid_lineage_marker(key, row[key]):
                 raise ValueError(f"invalid {key}")
+        tools = row.get("tools")
+        if isinstance(tools, list):
+            for tool in tools:
+                if isinstance(tool, dict):
+                    validate_report_fields(tool, row.get("provider"))
         scope = row.get("identity_scope_id")
         if self.seen and scope != self.scope:
             raise ValueError("identity_scope_id must be identical on all rows; marked/unmarked mixing is not allowed")
