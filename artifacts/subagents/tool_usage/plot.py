@@ -17,6 +17,7 @@ import md_table  # noqa: E402
 import png_sidecar  # noqa: E402
 import trace_db  # noqa: E402
 from subagent_cohorts import COHORT_SQL, summarize  # noqa: E402
+from tool_metrics import tool_aggregate_sql  # noqa: E402
 from style import (  # noqa: E402
     BAR_BLUE, BAR_GREEN, PROVIDER_COMPARISON_ORDER, mticker, plt,
     polish_axes, provider_title, save_plot, short_label,
@@ -34,6 +35,7 @@ FIELDS = ["row_type", "provider", "role", "tool_name", *COUNTS,
 
 def load_metrics(con):
     """Aggregate calls once; separately left-join sessions to retain zero-tool diversity."""
+    agg = tool_aggregate_sql()
     result = con.execute(f"""
         WITH cohort AS ({COHORT_SQL}), calls AS (
             SELECT c.provider, c.role,
@@ -44,14 +46,14 @@ def load_metrics(con):
             JOIN rounds r ON r.provider = c.provider AND r.session_id = c.session_id
             JOIN tool_calls tc ON tc.round_pk = r.round_pk
         )
-        SELECT provider, role, tool_name, count(*) AS calls,
-               count(*) FILTER (WHERE is_error = TRUE) AS errors,
-               count(*) FILTER (WHERE is_error = FALSE) AS successes,
-               count(*) FILTER (WHERE is_error IS NULL) AS unknown_outcomes,
-               count(*) FILTER (WHERE eff > 0) AS positive_latency_calls,
-               count(*) FILTER (WHERE eff IS NULL) AS missing_latency_calls,
-               count(*) FILTER (WHERE eff <= 0) AS nonpositive_latency_calls,
-               sum(eff) FILTER (WHERE eff > 0) AS latency_ms
+        SELECT provider, role, tool_name, {agg['calls']} AS calls,
+               {agg['errors']} AS errors,
+               {agg['successes']} AS successes,
+               {agg['unknown_outcomes']} AS unknown_outcomes,
+               {agg['positive_latency_calls']} AS positive_latency_calls,
+               {agg['missing_latency_calls']} AS missing_latency_calls,
+               {agg['nonpositive_latency_calls']} AS nonpositive_latency_calls,
+               {agg['latency_sum']} AS latency_ms
         FROM calls GROUP BY provider, role, tool_name
         ORDER BY provider, role, calls DESC, tool_name NULLS LAST
     """)

@@ -18,6 +18,7 @@ import md_table  # noqa: E402
 import trace_db  # noqa: E402
 from subagent_cohorts import COHORT_SQL, summarize  # noqa: E402
 from timing import MODEL_OUTPUT_EVENT_TYPES  # noqa: E402
+from token_policies import should_subtract_previous_output  # noqa: E402
 from trace_privacy import REPORT_SOURCE_PROVIDERS, validate_report_fields  # noqa: E402
 
 PROVIDERS = (("claude", "Claude"), ("codex", "Codex"))
@@ -96,7 +97,7 @@ def transition_values(previous, current):
         if not all(nonnegative(value) for value in (i, p, a)) or i != p + a:
             return None, None, "invalid_input_usage"
     delta = current["input_tokens_total"] - previous["input_tokens_total"]
-    if current["provider"] != "claude" and model != "gpt-5.5":
+    if not should_subtract_previous_output(current, "claude-and-gpt55"):
         return delta, None, "residual_model_policy"
     if min(previous["input_tokens_total"], current["input_tokens_total"]) <= 0:
         return delta, None, "residual_nonpositive_input"

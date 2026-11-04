@@ -59,6 +59,11 @@ dependencies; the composed modules import only from base ones.
 - **`formatters.py`** — token log-axis (`format_token_label`, `apply_binary_token_axis`),
   latency/duration/count/hours tick formatters, and the bin/threshold generators
   (`fine_latency_bin_edges`, `kv_cache_timeout_thresholds_seconds`, …) + their constants.
+- **`token_policies.py`** — shared provider/model eligibility for prior-output subtraction.
+  Adjusted append, token spindles, and report-context changes keep their own formulas.
+- **`tool_metrics.py`** — shared SQL aggregates for call counts, known/unknown outcomes,
+  and positive/missing/nonpositive effective latency. Callers choose their cohort,
+  grouping, name normalization, error-rate denominator, and empty-sum behavior.
 
 **Composed (Layer 1):**
 
