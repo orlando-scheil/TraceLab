@@ -38,7 +38,7 @@ Only the scripts and `README.md` files are tracked in git. Generated outputs
 - `human_in_the_loop/` — `human_input_wait`, `user_turn_response_time`,
   `user_turn_decomposition`.
 - `session/` — `session_token_steps`, `total_input_growth`.
-- `subagents/` — `adoption`, `workload`, `tokens_and_reports`, `tool_usage`.
+- `subagents/` — `adoption`, `workload`, `tokens_and_reports`, `tool_usage`, `timing`.
 
 Subagent experiments report Claude and Codex separately:
 
@@ -48,6 +48,7 @@ Subagent experiments report Claude and Codex separately:
 | [`workload`](subagents/workload/README.md) | Retained rounds and tool calls for matched mains and descendants. |
 | [`tokens_and_reports`](subagents/tokens_and_reports/README.md) | Recorded token usage and report-return context changes, not exact report-only token counts. |
 | [`tool_usage`](subagents/tool_usage/README.md) | Tool mix, known-outcome errors, diversity, and additive effective tool time by role. |
+| [`timing`](subagents/timing/README.md) | Observed elapsed time, time with tool calls outstanding, and per-subagent tool share. |
 
 Validation and audit checks live under `../validators/` and are run with
 `uv run python validators/run_all.py`.

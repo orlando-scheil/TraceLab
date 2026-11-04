@@ -157,6 +157,7 @@ EXPERIMENTS: list[Experiment] = [
     Experiment("subagents", "workload", "subagents/workload/analyze.py", "direct", "db", after=BUILD_DB_NAME),
     Experiment("subagents", "tokens_and_reports", "subagents/tokens_and_reports/analyze.py", "direct", "db", after=BUILD_DB_NAME),
     Experiment("subagents", "tool_usage", "subagents/tool_usage/plot.py", "direct", "db", after=BUILD_DB_NAME),
+    Experiment("subagents", "timing", "subagents/timing/analyze.py", "direct", "db", after=BUILD_DB_NAME),
 ]
 
 # Return codes used internally for non-process outcomes.

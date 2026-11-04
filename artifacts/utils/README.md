@@ -100,6 +100,9 @@ These are the definitions every experiment README points back to:
 
 - **effective tool latency** = `tool_internal_latency_ms` when present, else
   `tool_wall_latency_ms` (= `result_at − emitted_at`).
+- **time with tool calls outstanding** = the union of recorded `emitted_at` → `result_at`
+  intervals; concurrent intervals count once. This wall time differs from summed effective
+  latencies, which count each call separately and may use internal durations.
 - **Codex command wall time** = initial `exec_command.emitted_at` → the first linked result whose
   `command_status` is `finished` (the terminal `write_stdin` for a continued command).
 - **Codex command tool-call sum** = effective latency of the initial `exec_command` plus every
