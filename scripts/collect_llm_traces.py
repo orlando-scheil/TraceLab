@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from extract_codex_rounds import extract_codex_session
-from extract_claude_rounds import extract_session_with_key, load_existing_round_keys, round_key
+from extract_claude_rounds import extract_session_with_key, load_existing_round_keys, resolve_parent_links, round_key
 from trace_privacy import LineageMarkerValidator
 
 
@@ -330,7 +330,8 @@ def append_claude_round_trace(
                 f"{len(session_files)} session file(s)",
                 progress_enabled,
             )
-            for session_index, session_file in enumerate(session_files, start=1):
+            extracted = []
+            for session_file in session_files:
                 try:
                     session_key = str(session_file.relative_to(project_dir).with_suffix(""))
                     rounds = extract_session_with_key(
@@ -342,6 +343,9 @@ def append_claude_round_trace(
                         {"session_file": str(session_file), "error": f"{type(exc).__name__}: {exc}"}
                     )
                     continue
+                extracted.append((session_file, rounds))
+            resolve_parent_links(extracted)
+            for session_index, (session_file, rounds) in enumerate(extracted, start=1):
                 for round_obj in rounds:
                     markers.add(round_obj)
                 stats["candidate_rounds"] += len(rounds)

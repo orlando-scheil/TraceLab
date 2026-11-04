@@ -35,6 +35,13 @@ round key. Valid identities use `claude` / `codex` and a nonempty same-provider-
 No provenance-derived keys or synthetic missing sessions are created. Collisions already present
 after sanitization cannot be detected reliably; conflicting observations remain in `rounds`.
 
+Claude batch extraction can recover direct parents from a native sidecar's `toolUseId` by matching
+a unique `Agent`/`Task` launch and its paired structured child result within the same source family.
+The extractor validates identities and chronology before sanitization; the normalized trace retains
+only the resulting `parent_session_id`. Missing or ambiguous evidence does not create a parent,
+and `spawnDepth` alone is not treated as parent evidence. Family membership remains independent of
+direct-parent coverage.
+
 Trusted lineage requires **one canonical lowercase UUID `identity_scope_id` on every input round**,
 identifying one controlled sanitization batch. The DB accepts only the upstream UUID spelling
 (`8-4-4-4-12` lowercase hex), validating original JSON scalars in an extra scope-only scan when the

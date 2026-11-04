@@ -50,7 +50,7 @@ for _cand in (_HERE / "normalize", _HERE.parent.parent / "scripts"):
     if (_cand / "extract_claude_rounds.py").exists() and str(_cand) not in sys.path:
         sys.path.insert(0, str(_cand))
 
-from extract_claude_rounds import extract_session_with_key, write_rounds_jsonl  # noqa: E402
+from extract_claude_rounds import extract_session_with_key, resolve_parent_links, write_rounds_jsonl  # noqa: E402
 from extract_codex_rounds import extract_codex_session  # noqa: E402
 from sanitize_round_trace import (  # noqa: E402
     DEFAULT_SEED, StableIdSanitizer, sanitize_row, validate_sanitization_batch,
@@ -345,6 +345,7 @@ def _extract_normalized(
     if title_sink is None:
         title_sink = {}
     ordered = sorted(files)
+    claude_sessions = []
 
     def _merge(result) -> tuple[list[dict], str]:
         rows_i, rs, ts, warning, kind = result
@@ -378,8 +379,10 @@ def _extract_normalized(
     rows: list[dict] = []
     extracted_raw = False
     if results is not None:  # parallel: reassemble in the sorted order imap preserved
-        for result in results:
+        for path, result in zip(ordered, results):
             rows_i, kind = _merge(result)
+            if kind == "claude":
+                claude_sessions.append((path, rows_i))
             rows.extend(rows_i)
             extracted_raw = extracted_raw or kind in ("claude", "codex")
     else:  # serial (Pyodide, small inputs, or fallback)
@@ -391,8 +394,11 @@ def _extract_normalized(
                 note(f"Extracting {kind.capitalize()} sessions")
                 announced.add(kind)
             rows_i, _ = _merge(result)
+            if kind == "claude":
+                claude_sessions.append((path, rows_i))
             rows.extend(rows_i)
             extracted_raw = extracted_raw or kind in ("claude", "codex")
+    resolve_parent_links(claude_sessions)
     return rows, extracted_raw
 
 

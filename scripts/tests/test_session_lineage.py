@@ -10,12 +10,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "artifacts" / "utils"))
 
 import sanitize_round_trace as san
 import collect_llm_traces as collector
 from extract_claude_rounds import extract_session_with_key, write_rounds_jsonl
 from extract_codex_rounds import extract_codex_session
 from merge_round_traces import merge_round_traces
+from subagent_cohorts import COHORT_SQL
+from trace_db import connect, materialize
 from trace_privacy import validate_lineage_markers
 from web.payload import ingest
 
@@ -66,6 +69,88 @@ def test_claude_layout_and_detached(tmp_path):
     row = ingest._extract_one_file(child)[0][0]
     assert row["root_session_id"] == "claude:root" and row["parent_session_id"] is None
     assert ingest._extract_one_file(claude_file(tmp_path / "agent-child.jsonl"))[0][0]["session_origin"] == "unknown"
+
+
+@pytest.mark.parametrize("metadata", [None, {
+    "parentAgentId": "parent", "spawnDepth": 2, "workflowPhase": "implementation",
+}])
+def test_claude_workflow_layout(tmp_path, metadata):
+    for workflow in ("wf_12345678-abc", "wf_two"):
+        key = f"root/subagents/workflows/{workflow}/agent-child"
+        path = claude_file(tmp_path / "projects" / "project" / f"{key}.jsonl")
+        if metadata is not None:
+            path.with_suffix(".meta.json").write_text(json.dumps(metadata))
+        row = ingest._extract_one_file(path)[0][0]
+        assert row["session_id"] == f"claude:{key}"
+        assert row["session_origin"] == "claude_subagent_layout"
+        assert row["root_session_id"] == "claude:root"
+        assert row["parent_session_id"] is None
+        assert extract_session_with_key(path, "project", key) == [row]
+
+
+@pytest.mark.parametrize("key", [
+    "root/subagents/workflows/wf_one/journal",
+    "root/subagents/workflows/wf_one/nested/agent-child",
+    "root/subagents/workflows/wf_one/agent-child/nested",
+    "root/subagents/workflows/wf_/agent-child",
+    "root/subagents/workflows/wf-one/agent-child",
+    "root/subagents/workflows/other/agent-child",
+    "root/subagents/workflows/wf_one/agent-",
+    "root/subagents/workflows/wf_one/child",
+    "root/subagents/workflows/agent-child",
+    "extra/root/subagents/workflows/wf_one/agent-child",
+    "root/subagents/nested/agent-child",
+])
+def test_claude_unsupported_subagent_layouts(tmp_path, key):
+    path = claude_file(tmp_path / "projects" / "project" / f"{key}.jsonl")
+    row = ingest._extract_one_file(path)[0][0]
+    assert row["session_id"] == f"claude:{key}"
+    assert row["session_origin"] == "unknown"
+    assert row["root_session_id"] is None and row["parent_session_id"] is None
+
+
+@pytest.mark.parametrize("observed_root", [True, False])
+def test_claude_workflow_cohort(tmp_path, observed_root):
+    keys = [f"root/subagents/workflows/{workflow}/agent-child" for workflow in ("wf_one", "wf_two")]
+    if observed_root:
+        keys.append("root")
+    ids = san.StableIdSanitizer("workflow")
+    rows = [
+        san.sanitize_row(row, ids)
+        for key in keys
+        for row in ingest._extract_one_file(
+            claude_file(tmp_path / "projects" / "project" / f"{key}.jsonl")
+        )[0]
+    ]
+    assert validate_lineage_markers(rows) == ids.identity_scope_id
+    root = ids.session_id("claude", "claude:root")
+    children = {ids.session_id("claude", f"claude:{key}") for key in keys[:2]}
+    trace = write(tmp_path / "sanitized.jsonl", rows)
+    db = trace.with_suffix(".duckdb")
+    materialize(trace, db)
+    with connect(db) as con:
+        assert con.execute("SELECT count(*) FROM sessions").fetchone() == (len(keys),)
+        assert set(con.execute("""
+            SELECT session_id, observed_parent_session_id, parent_status,
+                   root_status, resolved_root_session_id, depth
+            FROM sessions WHERE session_origin = 'claude_subagent_layout'
+        """).fetchall()) == {
+            (child, None, "unknown", "resolved_explicit" if observed_root else "missing",
+             root if observed_root else None, None)
+            for child in children
+        }
+        cohort = con.execute(f"WITH cohort AS ({COHORT_SQL}) SELECT * FROM cohort").fetchall()
+        expected = ({("claude", root, root, "main")} | {
+            ("claude", child, root, "descendant") for child in children
+        }) if observed_root else set()
+        assert len(cohort) == len(expected)
+        assert set(cohort) == expected
+        assert con.execute(f"""
+            WITH cohort AS ({COHORT_SQL})
+            SELECT c.role, count(*) FROM cohort c
+            JOIN rounds r ON r.provider = c.provider AND r.session_id = c.session_id
+            GROUP BY c.role ORDER BY c.role
+        """).fetchall() == ([("descendant", 2), ("main", 1)] if observed_root else [])
 
 
 def codex_turn(turn="300", sequence=1):

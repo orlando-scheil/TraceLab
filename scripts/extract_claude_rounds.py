@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -373,6 +374,146 @@ def extract_session(session_file: Path, project: str) -> list[dict[str, Any]]:
     return extract_session_with_key(session_file, project, session_file.stem)
 
 
+def resolve_parent_links(sessions: list[tuple[Path, list[dict[str, Any]]]]) -> None:
+    """Recover direct parents from exact native launch IDs within the supplied raw files.
+
+    Keep this private evidence out of normalized rows. Single-file extraction cannot establish
+    call ownership across siblings; batch callers run this once before writing or sanitizing.
+    """
+    files = {}
+    copies = defaultdict(list)
+    children = {}
+    claims = defaultdict(list)
+    retained = defaultdict(list)
+    for path, rows in sessions:
+        path = Path(path).absolute()
+        if path in files:
+            copies[path].extend(rows)
+            continue
+        if not rows:
+            continue
+        sid = rows[0].get("session_id")
+        origin = rows[0].get("session_origin")
+        root = sid if origin == "claude_top_level_layout" else rows[0].get("root_session_id")
+        if (not isinstance(sid, str) or not sid.startswith("claude:")
+                or origin not in {"claude_top_level_layout", "claude_subagent_layout"}
+                or not isinstance(root, str)
+                or any(r.get("provider") != "claude" or r.get("session_id") != sid
+                       or r.get("session_origin") != origin for r in rows)):
+            continue
+        key = Path(sid[len("claude:"):])
+        if (not key.parts or key.is_absolute() or ".." in key.parts
+                or tuple(path.with_suffix("").parts[-len(key.parts):]) != key.parts):
+            continue
+        project_dir = path.parents[len(key.parts) - 1]
+        files[path] = (project_dir, sid, root, rows)
+        for row in rows:
+            for tool in row.get("tools", []):
+                retained[path, tool.get("tool_call_id")].append(tool)
+        # Workflow parentAgentId namespaces remain unproved; only normal child sidecars qualify.
+        match = re.fullmatch(r"([^/]+)/subagents/(agent-[A-Za-z0-9_-]+)", str(key))
+        if not match:
+            continue
+        try:
+            meta = json.loads(path.with_suffix(".meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            continue
+        call_id = meta.get("toolUseId") if isinstance(meta, dict) else None
+        if not isinstance(call_id, str) or not call_id.strip():
+            continue
+        children[path] = (match[2], meta)
+        claims[project_dir, call_id].append(path)
+
+    if not children:
+        return
+    calls, results = defaultdict(list), defaultdict(list)
+    first_events = {}
+
+    def timestamp(value):
+        parsed = parse_ts(value) if isinstance(value, str) else None
+        return parsed if parsed is not None and parsed.tzinfo is not None else None
+
+    # One linear pass, never a sibling-directory search or one rescan per child.
+    for path, (project_dir, sid, root, rows) in files.items():
+        first, incomplete = None, False
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    msg = record.get("message")
+                    if not isinstance(msg, dict):
+                        continue
+                    when = timestamp(record.get("timestamp"))
+                    if msg.get("role") in {"user", "assistant"}:
+                        incomplete = incomplete or when is None
+                        if when is not None:
+                            first = min(first, when) if first is not None else when
+                    content = msg.get("content")
+                    if not isinstance(content, list):
+                        continue
+                    result_blocks = [b for b in content if isinstance(b, dict)
+                                     and b.get("type") == "tool_result"]
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "tool_use" and msg.get("role") == "assistant":
+                            call_id = block.get("id")
+                            if isinstance(call_id, str) and (project_dir, call_id) in claims:
+                                calls[project_dir, call_id].append((path, block.get("name"), when))
+                        elif block.get("type") == "tool_result" and msg.get("role") == "user":
+                            call_id = block.get("tool_use_id")
+                            if isinstance(call_id, str) and (project_dir, call_id) in claims:
+                                native = record.get("toolUseResult")
+                                agent = native.get("agentId") if isinstance(native, dict) else None
+                                results[project_dir, call_id].append(
+                                    (path, agent, when, bool(block.get("is_error")), len(result_blocks))
+                                )
+        except (OSError, UnicodeError):
+            incomplete = True
+        first_events[path] = None if incomplete else first
+
+    for identity, child_paths in claims.items():
+        if len(child_paths) != 1 or len(calls[identity]) != 1 or len(results[identity]) != 1:
+            continue
+        child = child_paths[0]
+        owner, name, emitted = calls[identity][0]
+        recipient, agent, arrived, error, result_count = results[identity][0]
+        project_dir, sid, root, rows = files[child]
+        rows = rows + copies[child]
+        _, parent, parent_root, _ = files[owner]
+        if not isinstance(agent, str) or re.fullmatch(r"[A-Za-z0-9_-]+", agent) is None:
+            continue
+        agent_key = agent if agent.startswith("agent-") else f"agent-{agent}"
+        child_key, meta = children[child]
+        retained_calls = retained[owner, identity[1]]
+        first = first_events[child]
+        if (owner == child or recipient != owner or name not in {"Agent", "Task"}
+                or len(retained_calls) != 1 or retained_calls[0].get("tool_name") != name
+                or root != parent_root or agent_key != child_key or error or result_count != 1
+                or emitted is None or arrived is None or first is None
+                or arrived < emitted or first < emitted):
+            continue
+        explicit = meta.get("parentAgentId")
+        if explicit not in (None, ""):
+            if not isinstance(explicit, str) or re.fullmatch(r"[A-Za-z0-9_-]+", explicit) is None:
+                continue
+            explicit = explicit if explicit.startswith("agent-") else f"agent-{explicit}"
+            if parent != f"{root}/subagents/{explicit}":
+                # Contradictory native evidence cannot certify either direct parent.
+                for row in rows:
+                    row["parent_session_id"] = None
+                continue
+        if any(r.get("parent_session_id") not in (None, parent) for r in rows):
+            continue
+        for row in rows:
+            row["parent_session_id"] = parent
+
+
 def extract_session_with_key(
     session_file: Path,
     project: str,
@@ -416,6 +557,10 @@ def extract_session_with_key(
             candidate = f"claude:{match[1]}/subagents/{parent}"
             if candidate != session_id:
                 parent_session_id = candidate
+    elif match := re.fullmatch(r"([^/]+)/subagents/workflows/wf_[^/]+/agent-[^/]+", session_key):
+        session_origin = "claude_subagent_layout"
+        root_session_id = f"claude:{match[1]}"
+        # Workflow parentAgentId namespace is unproven; retain only root membership.
     elif project_layout and session_file.suffix == ".jsonl" and re.fullmatch(r"[^/]+", session_key):
         session_origin = "claude_top_level_layout"
     # Opt-in raw capture state (parallel to the round-building state above; never merged into it).
@@ -657,12 +802,16 @@ def main() -> int:
     project = project_dir.name
 
     all_rounds: list[dict[str, Any]] = []
+    extracted = []
     for session_file in session_files:
         session_key = str(session_file.relative_to(project_dir).with_suffix(""))
-        all_rounds.extend(extract_session_with_key(
+        rows = extract_session_with_key(
             session_file, project, session_key,
             project_layout=project_dir.parent.name == "projects",
-        ))
+        )
+        extracted.append((session_file, rows))
+        all_rounds.extend(rows)
+    resolve_parent_links(extracted)
 
     write_stats = write_rounds_jsonl(args.output, all_rounds, append_dedup=args.append_dedup)
 
