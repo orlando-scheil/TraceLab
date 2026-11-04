@@ -23,12 +23,12 @@ from trace_privacy import REPORT_SOURCE_PROVIDERS, validate_report_fields  # noq
 
 PROVIDERS = (("claude", "Claude"), ("codex", "Codex"))
 SOURCES = {provider: source for source, provider in REPORT_SOURCE_PROVIDERS.items()}
-EVIDENCE = {"claude": "Claude — candidate only", "codex": "Codex — supported wait receipt"}
-ROLES = (("main", "Known delegating main"), ("intermediate", "Intermediate recipient"))
+EVIDENCE = {"claude": "Possible replies (Agent/Task)", "codex": "Completed replies recorded by wait"}
+ROLES = (("main", "Main sessions"), ("intermediate", "Subagents"))
 METRICS = (("input_tokens_total", "Input"), ("output_tokens", "Output"))
 STAT_KEYS = ("n", "avg", "p25", "p50", "p90", "p99")
-DELTA_LABEL = "Net parent-context change at report-return transitions"
-RESIDUAL_LABEL = "Inferred context residual after previous-output deduction"
+DELTA_LABEL = "Input change"
+RESIDUAL_LABEL = "Input change after subtracting prior output"
 
 
 def nonnegative(value):
@@ -254,101 +254,114 @@ def fraction(value):
 
 
 def render_md(stats):
-    sections = []
-    for column, label in METRICS:
-        rows = []
-        for provider, name in PROVIDERS:
-            metric = stats["usage"][provider]["totals"][column]
-            for role in ("main", "descendant", "family"):
-                s = metric["roles"][role]
-                rows.append([name, role, fmt(s["total"])] + [fmt(s[key]) for key in STAT_KEYS])
-        sections.append((f"Recorded {label.lower()} totals per complete family", rows))
+    def distribution(groups, count=None):
+        return md_table.gfm_table(
+            ["Provider"] + ([count] if count else []) + ["Avg", "P25", "P50", "P90", "P99"],
+            [[label] + ([fmt(s["n"])] if count else [])
+             + [fmt(s[key]) for key in ("avg", "p25", "p50", "p90", "p99")]
+             for (_, label), s in zip(PROVIDERS, groups)],
+        )
+
+    def table(rows):
+        return md_table.gfm_table(["Measure", "Claude", "Codex"], rows)
+
     parts = [
         "# Tokens and reports\n\n"
-        "Recorded usage only; no tokenizer or text-length estimate. Input totals sum repeated context "
-        "across rounds, not unique tokens. Output includes reasoning once. Missing statistics are N/A.\n",
-        md_table.section_tables(["Provider", "Role", "Pooled tokens", "Families", "Avg", "P25", "P50", "P90", "P99"], sections),
+        "A family is one main session and all subagents linked to it, including indirect descendants. "
+        "The main must be identified by provider source or file layout, confirmed as its own root, "
+        "and have at least one linked subagent. Linked subagents may have unknown origins; "
+        "unknown-origin roots are excluded. One recorded model round is one retained LLM row, not a request.\n\n"
+        "Recorded usage only; no text-length estimate. Input totals sum repeated context across rounds, "
+        "not unique or uncached-only tokens. Output already includes reasoning. "
+        "Avg is the average; P25/P50/P90/P99 are the 25th/50th/90th/99th percentiles. "
+        "P50 is the median; about 90% of observations fall at or below P90. Missing statistics are N/A.\n",
     ]
-    coverage = []
     for column, label in METRICS:
-        for provider, name in PROVIDERS:
-            usage = stats["usage"][provider]
-            s = usage["totals"][column]
-            coverage.append([name, label, fmt(usage["families"]), fmt(usage["rounds"]),
-                             fmt(s["excluded_families"]), fmt(s["invalid_rounds"]),
-                             fmt(s["positive_families"]), fmt(s["descendant_majority_families"]),
-                             fraction(s["descendant_majority_fraction"])])
-    parts += ["## Family coverage and descendant-majority fraction\n",
-              md_table.gfm_table(["Provider", "Metric", "Retained families", "Retained rounds", "Excluded families",
-                                  "Invalid/missing rounds", "Eligible positive families", "Descendant-majority families", "Fraction"], coverage)]
-    rows, coverage = [], []
-    for provider, name in PROVIDERS:
-        for role in ("main", "descendant"):
-            s = stats["usage"][provider]["context"][role]
-            for metric in ("first", "peak"):
-                rows.append([name, role, metric] + [fmt(s[metric][key]) for key in STAT_KEYS])
-            coverage.append([name, role, fmt(s["sessions"]), fmt(s["sessions"] - s["first"]["n"]),
-                             fmt(s["sessions"] - s["peak"]["n"]), fmt(s["incomplete_sessions"]),
-                             fmt(s["valid_rounds"]), fmt(s["rounds"])])
-    parts += ["## First and peak observed input per session\n",
-              md_table.gfm_table(["Provider", "Role", "Metric", "Sessions", "Avg", "P25", "P50", "P90", "P99"], rows),
-              md_table.gfm_table(["Provider", "Role", "Sessions", "First unavailable", "Peak unavailable",
-                                  "Incomplete input coverage", "Valid input rounds", "Retained rounds"], coverage),
-              "First means the first retained round ordered by round_index then ingest_seq (nulls last), "
-              "not the first valid value. Peak uses available nonnegative inputs; incomplete sessions can understate it.\n",
-              "## Report-associated recipient transitions\n\n"
-              "**Exact report-only token counts are not identifiable from retained usage.** These metrics are "
-              "derived from recorded usage, not report-body token counts. Codex completed wait receipts are "
-              "supported evidence; Claude Agent/Task results are candidates only, not confirmed completed reports. "
-              "No report evidence means unavailable evidence, not observed zero returns.\n\n"
-              f"**{DELTA_LABEL}** = I_current − I_previous. "
-              f"**{RESIDUAL_LABEL}** = delta − O_previous, only for Claude and exact Codex `gpt-5.5`. "
-              "Both are signed. Other messages/results, context removal, and compaction can contribute; "
-              "neither statistic isolates report content. Each consuming transition is counted once.\n"]
-    for role, role_label in ROLES:
+        metrics = [stats["usage"][p]["totals"][column] for p, _ in PROVIDERS]
+        parts += [f"## Recorded {label.lower()} tokens by family\n",
+                  "Each family needs valid usage in every recorded round, checked separately for input and output. "
+                  "Each family counts once; subagent tokens combine all its subagents.\n"]
         rows = []
-        for provider, _ in PROVIDERS:
-            block = stats["reports"][provider][role]
-            for metric, label in (("delta", DELTA_LABEL), ("residual", RESIDUAL_LABEL)):
-                rows.append([EVIDENCE[provider], label] + [fmt(block[metric][key]) for key in STAT_KEYS])
-        parts += [f"### {role_label}\n", md_table.gfm_table(
-            ["Evidence", "Metric", "Transitions", "Avg", "P25", "P50", "P90", "P99"], rows)]
+        for role, name in (("main", "Main sessions"), ("descendant", "Subagents"), ("family", "Whole families")):
+            rows.append([f"{name} — total tokens"] + [fmt(s["roles"][role]["total"]) for s in metrics])
+        parts.append(table(rows))
+        for role, name in (("main", "Main sessions"), ("descendant", "Subagents"), ("family", "Whole families")):
+            parts += [f"### {name} — tokens per family\n", distribution([s["roles"][role] for s in metrics])]
+        rows = [[name] + [fmt(stats["usage"][p][key]) for p, _ in PROVIDERS]
+                for key, name in (("families", "All recorded families"), ("rounds", "Rounds"))]
+        rows += [[name] + [fmt(s[key]) for s in metrics] for key, name in (
+            ("excluded_families", "Families excluded for missing or invalid usage"),
+            ("invalid_rounds", "Rounds with missing or invalid usage"),
+            ("positive_families", "Complete families with a positive token total"),
+        )]
+        rows.insert(1, ["Families with complete usage"] + [fmt(s["roles"]["family"]["n"]) for s in metrics])
+        rows.append(["Families where subagents use more tokens than the main"] + [
+            f"{fmt(s['descendant_majority_families'])} ({fraction(s['descendant_majority_fraction'])})" for s in metrics
+        ])
+        parts += ["### Coverage and subagent share\n",
+                  "The percentage uses complete families with positive totals. Ties do not count as a majority; "
+                  "zero-total families stay in the distributions.\n", table(rows)]
+    parts += ["## First and peak input per session\n",
+              "First uses the first recorded round, not the first valid value. Peak is the largest valid input; "
+              "missing inputs can understate it. The Sessions column counts available measurements, even in incomplete families.\n"]
+    for role, label in (("main", "Main sessions"), ("descendant", "Subagents")):
+        groups = [stats["usage"][p]["context"][role] for p, _ in PROVIDERS]
+        parts.append(f"### {label}\n")
+        for key, name in (("first", "First input (tokens)"), ("peak", "Peak input (tokens)")):
+            parts += [f"#### {name}\n", distribution([s[key] for s in groups], "Sessions")]
+        rows = [["Sessions"] + [fmt(s["sessions"]) for s in groups]]
+        rows += [[name] + [fmt(s[key]) for s in groups] for key, name in (
+            ("incomplete_sessions", "Sessions with incomplete input coverage"),
+            ("valid_rounds", "Rounds with valid input"), ("rounds", "Rounds"),
+        )]
+        parts += ["#### Input coverage\n", table(rows)]
+    parts += ["## Input changes around subagent replies\n\n"
+              "**These are input changes, not exact report-token counts.** Other messages, tool results, "
+              "and context removal can affect them.\n\n"
+              "Claude's possible replies are not confirmed completed reports. Codex records completed wait replies. "
+              "These are different kinds of evidence, not equivalent report counts. Missing evidence does not prove no replies.\n\n"
+              "Each round pair compares the round receiving a reply with the preceding round in the same session. "
+              "The receiving session may be a main or a subagent. Input change is current minus previous input; "
+              "the second table also subtracts previous output. Both can be negative. "
+              "The Round pairs column counts available measurements; values are tokens.\n",
+              table([["Evidence type", EVIDENCE["claude"], EVIDENCE["codex"]]])]
+    for role, role_label in ROLES:
+        parts.append(f"### {role_label}\n")
+        for metric, label in (("delta", DELTA_LABEL), ("residual", RESIDUAL_LABEL)):
+            parts += [f"#### {label}\n", distribution([stats["reports"][p][role][metric] for p, _ in PROVIDERS], "Round pairs")]
     coverage_labels = (
         ("tool_calls", "Tool calls inspected"), ("no_report_evidence", "Calls without report evidence"),
-        ("annotated_entries", "Annotated entries"), ("evidence_entries", "Supported/candidate entries"),
+        ("annotated_entries", "Calls with saved report fields"), ("evidence_entries", "Calls with valid report evidence"),
         ("invalid_report_metadata", "Invalid report metadata (excluded)"),
         ("known_error_returns", "Known errors (excluded)"), ("missing_call_id", "Missing call ID"),
-        ("ambiguous_call_id", "Ambiguous call occurrence"), ("no_consuming_round", "No consuming round"),
-        ("ambiguous_result_consumer", "Ambiguous result consumer"),
-        ("recipient_not_in_cohort", "Recipient outside matched cohort"), ("not_later_round", "Not a later indexed round"),
-        ("unavailable_consumption_timing", "Unavailable consumption timing"),
-        ("impossible_consumption_timing", "Impossible/conflicting consumption timing"),
+        ("ambiguous_call_id", "Repeated call ID"), ("no_consuming_round", "No receiving round"),
+        ("ambiguous_result_consumer", "Multiple receiving rounds"),
+        ("recipient_not_in_cohort", "Recipient outside the included families"), ("not_later_round", "Not a later indexed round"),
+        ("unavailable_consumption_timing", "Missing timing"),
+        ("impossible_consumption_timing", "Invalid or conflicting timing"),
         ("report_after_model_output", "Report arrived after first model output"),
-        ("mapped_entries", "Entries with valid consumption timing"), ("consuming_transitions", "Unique consuming transitions"),
+        ("mapped_entries", "Calls with valid timing"), ("consuming_transitions", "Rounds receiving results"),
         ("nonconsecutive_or_ambiguous_rounds", "Missing/duplicate consecutive round pair"),
         ("model_missing_or_changed", "Missing/changed model"), ("invalid_input_usage", "Invalid/inconsistent input usage"),
-        ("residual_model_policy", "Residual: excluded model policy"),
-        ("residual_nonpositive_input", "Residual: nonpositive input"),
-        ("residual_missing_or_nonpositive_output", "Residual: missing/nonpositive previous output"),
+        ("residual_model_policy", "Prior-output adjustment: unsupported model"),
+        ("residual_nonpositive_input", "Prior-output adjustment: zero or negative input"),
+        ("residual_missing_or_nonpositive_output", "Prior-output adjustment: missing, zero or negative prior output"),
     )
-    for role, label in (*ROLES, ("unclassified", "Unclassified recipient (coverage only)")):
+    parts += ["## Report evidence coverage\n",
+              "Counts are grouped by the receiving session. Several calls can share a receiving round. "
+              "Call and round-pair checks use different totals, so these rows should not be added together.\n"]
+    for role, label in (*ROLES, ("unclassified", "Other recipients")):
         blocks = [stats["reports"][p][role] for p, _ in PROVIDERS]
-        rows = [["Evidence status"] + ["Evidence available" if b["coverage"]["evidence_entries"] else "No report evidence" for b in blocks]]
+        rows = [["Captured evidence"] + ["Evidence available" if b["coverage"]["evidence_entries"] else "No report evidence" for b in blocks]]
         rows += [[label] + [fmt(b["coverage"][key]) for b in blocks] for key, label in coverage_labels]
-        rows += [["Eligible delta transitions"] + [fmt(b["delta"]["n"]) for b in blocks],
-                 ["Eligible residual transitions"] + [fmt(b["residual"]["n"]) for b in blocks]]
-        parts += [f"### Coverage — {label}\n", md_table.gfm_table(["Count / status", EVIDENCE["claude"], EVIDENCE["codex"]], rows)]
-    parts.append("The recipient is the session owning the call and consuming its result, never its ultimate root. "
-                 "Intermediate receipts are not main receipts. Entry exclusions use the first failing check; "
-                 "consumption requires timed report arrival at or before the first model output, never event-list order. "
-                 "transition exclusions apply after receipt deduplication. Null annotations, including legacy data, "
-                 "cannot establish absence of returns. See README for eligibility and recording limits.\n")
+        parts += [f"### {label}\n", table(rows)]
+    parts.append("See the reference for timing, model, and usage checks.\n")
     return "\n".join(parts)
 
 
 def render_headline(stats):
     return [
-        {"label": f"{name} median family {label.lower()}",
+        {"label": f"{name} median {label.lower()} tokens per complete family",
          "value": fmt(stats["usage"][provider]["totals"][column]["roles"]["family"]["p50"])}
         for provider, name in PROVIDERS for column, label in METRICS
     ]

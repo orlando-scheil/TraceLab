@@ -124,8 +124,32 @@ def test_exact_names_and_full_tail(con, tmp_path):
     assert len([r for r in rows if r["row_type"] == "tool"]) == len(names)
     text = (tmp_path / "tool_usage.md").read_text()
     assert "a&#124;b&lt;c&gt;" in text
-    assert "omitted tail" in text
+    assert "Tools outside the figure" in text
     assert "Codex: no linked data" in text
+    assert text.count("| Provider | Avg | P25 | P50 | P90 | P99 |") == 2
+    assert "#### <code> shell </code>" in text
+    assert "| Outcome coverage | 0% | N/A |" in text
+    assert "<br>" not in text and "; mean" not in text
+
+
+def test_display_aligns_asymmetric_tool_names_and_missing_latency(con):
+    family(con, "claude")
+    family(con, "codex", 10)
+    con.execute("""
+        INSERT INTO tool_calls VALUES
+        (0, 'shared', TRUE, 100, NULL), (10, 'shared', FALSE, NULL, NULL),
+        (0, 'Claude-only', NULL, NULL, NULL), (10, 'Codex-only', FALSE, 0, 10);
+    """)
+    page = plot.render_md(*plot.load_metrics(con))
+    shared = page.split("#### <code>shared</code>")[1]
+    assert "| Calls | 1 | 1 |" in shared and "| Call share | 50% | 50% |" in shared
+    assert "| Known errors | 1 | 0 |" in shared and "| Known successes | 0 | 1 |" in shared
+    assert "| Error rate | 100% | 0% |" in shared and "| Outcome coverage | 100% | 100% |" in shared
+    assert "| Summed tool time (ms) | 100 | N/A |" in shared
+    assert "| Calls with missing time | 0 | 1 |" in shared
+    codex_only = page.split("#### <code>Codex-only</code>")[1].split("####")[0]
+    assert "| Calls | N/A | 1 |" in codex_only
+    assert "<br>" not in page and "; mean" not in page
 
 
 @pytest.mark.parametrize("population", ["empty", "zero", "calls"])

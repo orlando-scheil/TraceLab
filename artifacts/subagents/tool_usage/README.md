@@ -1,22 +1,19 @@
 # Tool usage in linked subagent families
 
-Compare Claude and Codex separately, with main and descendant sessions side by side.
-This analysis answers five questions:
+Compare tool calls, errors, and tool time in a main session and its subagents. Only mains with linked subagents are included.
 
-1. How many calls does each tool receive in each role?
-2. How does the tool mix differ between main and descendant sessions?
-3. For the same named tool, what fraction of known outcomes are errors?
-4. How many distinct named tools does a session use, including sessions with no calls?
-5. Which tools account for additive positive effective tool time?
+**Tool time is summed call time, not elapsed runtime:** calls may overlap. Unknown outcomes are not successes, and **N/A** means unavailable, not zero.
 
 ## Population and definitions
 
 The shared `subagent_cohorts.COHORT_SQL` selects positively known delegating main
 sessions with resolved self-roots and their resolved descendants. A main is counted
 once regardless of its number of children. Descendants include deeper descendants,
-not just direct children. Unknown-origin families, unresolved links, and mains
+not just direct children. Families with unknown-origin roots, unresolved links, and mains
 without linked descendants are excluded. These are matched families, not all
 sessions and not a controlled comparison of equivalent tasks.
+
+Main origin comes from provider source or file layout, not incoming links. A linked descendant may itself have unknown origin.
 
 Sessions join rounds on **provider and session ID**. Calls join rounds on
 **round_pk**. Calls are not expanded by child count. Tool names are compared exactly
@@ -27,13 +24,12 @@ accounting, but never count as a distinct named tool. Other names are not trimme
 - **Calls:** all recorded calls for a provider, role, and exact tool name.
 - **Call share:** tool calls / all calls in the same provider and role, including
   unnamed calls. A role with no calls has an unavailable share, not zero percent.
-- **Error rate:** `TRUE / (TRUE + FALSE)` for that tool, provider, and role.
+- **Error rate:** known errors divided by known errors plus known successes for that tool, provider, and role.
   Unknown outcomes are excluded from this denominator, never treated as success.
-- **Known-outcome coverage:** `(TRUE + FALSE) / all calls`; unknown counts appear
+- **Known-outcome coverage:** known errors plus known successes, divided by all calls; unknown counts appear
   alongside it. No known outcomes means an unavailable error rate.
 - **Tool diversity:** distinct nonblank names per session. Sessions without calls
-  or with only unnamed calls contribute a genuine zero. The table gives session
-  count, mean, p25, p50, p90, and p99 using the shared `summarize` method. An empty
+  or with only unnamed calls contribute a genuine zero. The distribution has provider rows and separate Avg/P25/P50/P90/P99 columns using the shared `summarize` method; session counts appear in the preceding totals. An empty
   cohort has count zero and unavailable statistics, not measured zero diversity.
 - **Effective tool time:** the existing `trace_db.EFFECTIVE_TOOL_LATENCY_MS_SQL`
   selects internal latency when present, otherwise wall latency. A zero or negative
@@ -59,6 +55,8 @@ and role. Neither the full tool tables nor the CSV drops the tail. The call mix 
 not renormalized to the displayed names. Empty provider panels say “No linked
 data”; linked roles without calls and roles without positive latency are labeled
 separately. Missing latency is not drawn as measured zero.
+
+Full tool tables use one measure per row, with Claude and Codex columns, under each exact tool name. Counts, shares, outcomes, and time are separate rows, not combined cells.
 
 Exact-name comparisons do not imply equivalent tool behavior between providers.
 Different task mixes, tool availability, family sizes, outcome recording, and

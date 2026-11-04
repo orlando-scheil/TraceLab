@@ -172,53 +172,96 @@ def format_value(value):
     return str(value)
 
 
+def render_md(groups, tools):
+    def percent(value):
+        return "N/A" if value is None else f"{100 * value:,.4g}%"
+
+    def table(rows):
+        return md_table.gfm_table(["Measure", "Claude", "Codex"], rows)
+
+    blocks = ["# Tool usage in linked subagent families\n",
+              "Main sessions are identified by provider source or file layout, confirmed as their own roots, "
+              "and included only when they have linked subagents. Each main is counted once. "
+              "Linked subagents include indirect descendants and may have unknown origins themselves; "
+              "unknown-origin roots are excluded. A family is a main and its linked subagents.\n\n"
+              "## Reading the tool tables\n\n"
+              "Error rate uses only known outcomes. Outcome coverage is the share of calls with a known success or error. "
+              "Call and time shares use all tools in the same provider and session group.\n\n"
+              "Time sums positive call latencies (ms), not elapsed runtime. No positive time means N/A; "
+              "time share is zero only when the group has positive time. Missing tool rows are N/A, not zero.\n"]
+    for provider in PROVIDER_COMPARISON_ORDER:
+        if not any(r["diversity_n"] for r in groups if r["provider"] == provider):
+            blocks.append(f"**{provider_title(provider)}: no linked data.**\n")
+    group_lookup = {(r["provider"], r["role"]): r for r in groups}
+    tool_lookup = {(r["provider"], r["role"], r["tool_name"]): r for r in tools}
+    names = selected_names(tools)
+    for role, label in (("main", "Main sessions"), ("descendant", "Subagents")):
+        pair = [group_lookup[p, role] for p in PROVIDER_COMPARISON_ORDER]
+        rows = [[label] + [format_value(r[key]) for r in pair] for key, label in (
+            ("diversity_n", "Sessions"), ("calls", "Tool calls"),
+            ("errors", "Known errors"), ("successes", "Known successes"), ("unknown_outcomes", "Unknown outcomes"),
+            ("positive_latency_calls", "Calls with positive time"), ("missing_latency_calls", "Calls with missing time"),
+            ("nonpositive_latency_calls", "Calls with zero or negative time"), ("latency_ms", "Summed positive tool time (ms)"),
+        )]
+        rows += [[label] + [percent(r[key]) for r in pair] for key, label in (
+            ("error_rate", "Error rate"),
+            ("known_outcome_coverage", "Outcome coverage"),
+        )]
+        blocks += [f"## {label}\n", table(rows)]
+        blocks += ["### Distinct tools per session\n", md_table.gfm_table(
+            ["Provider", "Avg", "P25", "P50", "P90", "P99"],
+            [[provider_title(r["provider"])] + [format_value(r[f"diversity_{stat}"]) for stat in ("avg", "p25", "p50", "p90", "p99")]
+             for r in pair],
+        )]
+    blocks.append("Distinct tools counts exact, nonblank names; sessions with no named tools count as zero. "
+                  "Avg is the average; P25/P50/P90/P99 are percentiles, with P50 the median.\n")
+    blocks += ["## Tools outside the figure\n",
+                f"The figure shows the top {len(names)} tool names. "
+                "Ranked by combined calls across providers and roles; ties by exact name. "
+                "The same names and axes are used in both provider rows and both panels. "
+                "Only the figure omits these calls; all tools remain in the tables below.\n"]
+    for role, label in (("main", "Main sessions"), ("descendant", "Subagents")):
+        rows = []
+        for provider in PROVIDER_COMPARISON_ORDER:
+            group = group_lookup[provider, role]
+            omitted = [r for r in tools if (r["provider"], r["role"]) == (provider, role) and r["tool_name"] not in names]
+            calls = sum(r["calls"] for r in omitted)
+            rows.append([provider_title(provider), len(omitted), f"{calls:,}", percent(calls / group["calls"] if group["calls"] else None)])
+        blocks += [f"### {label}\n", md_table.gfm_table(["Provider", "Tools (including unnamed)", "Calls", "Call share"], rows)]
+    blocks += ["## Every recorded tool\n",
+               "Names are kept exactly as recorded; matching names do not guarantee matching behavior. "
+               "Blank or missing names share one unnamed-call group, excluded from distinct-tool counts.\n"]
+    for role, label in (("main", "Main sessions"), ("descendant", "Subagents")):
+        role_names = sorted({r["tool_name"] for r in tools if r["role"] == role}, key=lambda n: (n is None, n or ""))
+        blocks.append(f"### {label}\n")
+        for name in role_names:
+            safe_name = html.escape(display_name(name)).replace("|", "&#124;").replace("\n", " ").replace("\r", " ")
+            rows = []
+            for key, metric, formatter in (
+                ("calls", "Calls", format_value), ("call_share", "Call share", percent),
+                ("errors", "Known errors", format_value), ("successes", "Known successes", format_value),
+                ("unknown_outcomes", "Unknown outcomes", format_value), ("error_rate", "Error rate", percent),
+                ("known_outcome_coverage", "Outcome coverage", percent),
+                ("latency_ms", "Summed tool time (ms)", format_value), ("latency_share", "Time share", percent),
+                ("positive_latency_calls", "Calls with positive time", format_value),
+                ("missing_latency_calls", "Calls with missing time", format_value),
+                ("nonpositive_latency_calls", "Calls with zero or negative time", format_value),
+            ):
+                cells = []
+                for provider in PROVIDER_COMPARISON_ORDER:
+                    r = tool_lookup.get((provider, role, name))
+                    cells.append("N/A" if r is None else formatter(r[key]))
+                rows.append([metric, *cells])
+            blocks += [f"#### <code>{safe_name}</code>\n", table(rows)]
+    return "\n".join(blocks)
+
+
 def write_tables(groups, tools, output_dir):
     with (output_dir / "tool_usage.csv").open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDS)
         writer.writeheader()
         writer.writerows([*groups, *tools])
-    blocks = ["# Tool usage in linked subagent families\n",
-              "Claude and Codex are separate populations. Main sessions are counted once, "
-              "not once per child. N/A means no eligible measurement; rates/shares are fractions.\n"]
-    for provider in PROVIDER_COMPARISON_ORDER:
-        if not any(r["diversity_n"] for r in groups if r["provider"] == provider):
-            blocks.append(f"**{provider_title(provider)}: no linked data.**\n")
-    summary_columns = ["provider", "role", "diversity_n", "calls", "errors", "successes",
-                       "unknown_outcomes", "error_rate", "known_outcome_coverage"]
-    blocks += ["## Role totals and outcome coverage\n", md_table.gfm_table(summary_columns,
-               [[format_value(r[k]) for k in summary_columns] for r in groups])]
-    diversity_columns = ["provider", "role", *[f"diversity_{k}" for k in STATS]]
-    blocks += ["## Distinct named tools per session (including zero-call sessions)\n",
-               md_table.gfm_table(diversity_columns,
-               [[format_value(r[k]) for k in diversity_columns] for r in groups])]
-    names = selected_names(tools)
-    tail = []
-    for group in groups:
-        rows = [r for r in tools if (r["provider"], r["role"]) == (group["provider"], group["role"])
-                and r["tool_name"] not in names]
-        calls = sum(r["calls"] for r in rows)
-        tail.append([group["provider"], group["role"], len(rows), calls,
-                     format_value(calls / group["calls"] if group["calls"] else None)])
-    blocks += [f"## Figure selection: shared top {len(names)} names; omitted tail\n",
-               "Ranked by combined calls across providers and roles; ties by exact name. "
-               "The same names and axes are used in both provider rows and both panels.\n",
-               md_table.gfm_table(["Provider", "Role", "Omitted tool buckets", "Omitted calls", "Role call share"], tail)]
-    columns = ["provider", "role", "tool_name", "calls", "call_share", "errors", "successes",
-               "unknown_outcomes", "error_rate", "known_outcome_coverage"]
-    latency_columns = ["provider", "role", "tool_name", "positive_latency_calls",
-                       "missing_latency_calls", "nonpositive_latency_calls", "latency_ms", "latency_share"]
-    for heading, keys in (("All tools: calls, mix, and same-tool outcomes", columns),
-                          ("All tools: additive positive effective time (not elapsed)", latency_columns)):
-        body = []
-        for row in tools:
-            body.append([html.escape(display_name(row[k])).replace("|", "&#124;").replace("\n", " ").replace("\r", " ")
-                         if k == "tool_name" else format_value(row[k]) for k in keys])
-        blocks += [f"## {heading}\n", md_table.gfm_table(keys, body)]
-    blocks.append("Error rate = TRUE / (TRUE + FALSE); known-outcome coverage = (TRUE + FALSE) / calls. "
-                  "Call and latency shares use all tools in the same provider/role, including unnamed calls. "
-                  "Only positive effective latency is summed; internal latency takes precedence even when nonpositive. "
-                  "No positive observations means N/A, not measured zero. See README for cohort and comparison limits.\n")
-    (output_dir / "tool_usage.md").write_text("\n".join(blocks), encoding="utf-8")
+    (output_dir / "tool_usage.md").write_text(render_md(groups, tools), encoding="utf-8")
 
 
 def main() -> int:

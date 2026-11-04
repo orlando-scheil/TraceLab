@@ -138,13 +138,23 @@ def test_adoption_denominators_topology_and_depth_coverage(db_for, family_rows):
         assert d["depth"] == pytest.approx(summarize([1, 2, 1]))
 
     md = adoption.render_md(data)
-    assert "| Observed adoption (F/M) | 3 | 4 | 75.0% |" in md
-    assert "| Main linkage eligibility (M/M0) | 4 | 5 | 80.0% |" in md
-    assert "| Classified subagent share (C0/(M0+C0)) | 6 | 11 | 54.5% |" in md
-    assert "| Unknown-origin share (U/(M0+C0+U)) | 2 | 13 | 15.4% |" in md
-    assert "| Nested / (nested + flat) | 1 | 2 | 50.0% |" in md
-    assert "| Known topology / F | 2 | 3 | 66.7% |" in md
-    assert "| Known depth / D | 3 | 4 | 75.0% |" in md
+    assert "Rates and coverage" not in md and "<br>" not in md and "; mean" not in md
+    assert "| Main sessions with confirmed roots | 4 | 4 |" in md
+    assert "| Main sessions with subagents | 3 | 3 |" in md
+    assert "| Subagents with a known parent in the family | 3 | 3 |" in md
+    assert "| Linked sessions outside these families | 1 | 0 |" in md
+    assert "| Provider | Avg | P25 | P50 | P90 | P99 |" in md
+    depth = md.split("### Subagent depth\n")[1]
+    assert "| Provider | Count | Avg | P25 | P50 | P90 | P99 |" in depth
+    assert "| Claude | 3 | 1.33 | 1.00 | 1.00 | 1.80 | 1.98 |" in depth
+    assert md.count("| Provider |") == 3
+    structure = md.split("## Family structure\n")[1].split("## Family size and depth\n")[0]
+    assert structure.count("```text\n") == 3
+    assert "synthetic examples, not reconstructions of actual data" in structure
+    assert "direct launch links**, not just family membership" in structure
+    assert "even if other parent links are unknown" in structure
+    unknown_diagram = structure.split("**Unknown structure:**")[1].split("```text\n")[1].split("```")[0]
+    assert "Main  A  B  C" in unknown_diagram and "→" not in unknown_diagram
 
 
 @pytest.mark.parametrize("provider", ORIGINS)
@@ -195,9 +205,12 @@ def test_workload_no_round_tool_or_main_child_fanout(db_for, family_rows):
             assert s["one_round_sessions"] == sum(n == 1 for n in rounds)
         assert d["excluded_resolved_descendants"] == (1 if provider == "claude" else 0)
     md = workload.render_md(data)
-    assert "| Zero-tool sessions | 2 | 3 | 66.7% |" in md
-    assert "| One-observed-round sessions (not success) | 4 | 4 | 100.0% |" in md
-    assert "| One-observed-round sessions (not success) | 3 | 4 | 75.0% |" in md
+    assert "| Sessions with no tool calls | 2 (66.7%) | 2 (66.7%) |" in md
+    assert "| Sessions with one round | 4 (100.0%) | 3 (75.0%) |" in md
+    assert md.count("| Provider | Avg | P25 | P50 | P90 | P99 |") == 6
+    assert md.count("### Rounds per session") == md.count("### Tool calls per session") == 2
+    assert "| Claude | 1.33 | 1.00 | 1.00 | 1.80 | 1.98 |" in md
+    assert "Count" not in md and "<br>" not in md and "; mean" not in md
 
 
 def test_empty_cohort_is_not_zero_workload_or_unknown_adoption(db_for):
@@ -214,6 +227,9 @@ def test_empty_cohort_is_not_zero_workload_or_unknown_adoption(db_for):
             assert w[provider][role]["tools_per_session"] == summarize([])
             assert w[provider][role]["tools_per_round"] == summarize([])
     assert all(item["value"] == "N/A" for item in workload.render_headline(w))
+    assert "| Main sessions with confirmed roots | 1 | 0 |" in adoption.render_md(a)
+    assert "| Claude | 0 | N/A | N/A | N/A | N/A | N/A |" in adoption.render_md(a)
+    assert "| Claude | N/A | N/A | N/A | N/A | N/A |" in workload.render_md(w)
 
 
 def test_unscoped_known_origins_keep_classification_not_linkage(db_for, family_rows):
@@ -232,16 +248,16 @@ def test_unscoped_known_origins_keep_classification_not_linkage(db_for, family_r
 
 @pytest.mark.parametrize("name,module,expected", [
     ("adoption", adoption, [
-        {"label": "Claude observed adoption (F/M)", "value": "75.0%"},
-        {"label": "Codex observed adoption (F/M)", "value": "75.0%"},
-        {"label": "Claude descendants / F main", "value": "1.33"},
-        {"label": "Codex descendants / F main", "value": "1.33"},
+        {"label": "Claude main sessions with subagents", "value": "75.0%"},
+        {"label": "Codex main sessions with subagents", "value": "75.0%"},
+        {"label": "Claude average subagents per main session", "value": "1.33"},
+        {"label": "Codex average subagents per main session", "value": "1.33"},
     ]),
     ("workload", workload, [
-        {"label": "Claude main rounds / session", "value": "1.33"},
-        {"label": "Claude descendant rounds / session", "value": "1.00"},
-        {"label": "Codex main rounds / session", "value": "1.67"},
-        {"label": "Codex descendant rounds / session", "value": "1.25"},
+        {"label": "Claude average rounds per main session", "value": "1.33"},
+        {"label": "Claude average rounds per subagent", "value": "1.00"},
+        {"label": "Codex average rounds per main session", "value": "1.67"},
+        {"label": "Codex average rounds per subagent", "value": "1.25"},
     ]),
 ])
 @pytest.mark.parametrize("source", ["db", "input"])
@@ -259,13 +275,13 @@ def test_main_emits_only_expected_artifacts_with_computed_provider_values(
     assert module.main([f"--{source}", str(db if source == "db" else trace), "--output-dir", str(out)]) == 0
     assert {path.name for path in out.iterdir()} == {f"{name}.md", "headline.json"}
     md = (out / f"{name}.md").read_text(encoding="utf-8")
-    assert "## Claude" in md and "## Codex" in md
+    assert "| Claude | Codex |" in md
     assert "not complete real execution" in md
     assert "claude:root" not in md and "codex:root" not in md
     assert json.loads((out / "headline.json").read_text(encoding="utf-8")) == expected
     assert db.read_bytes() == before
     stdout = capsys.readouterr().out
-    assert "## Claude" in stdout and "## Codex" in stdout
+    assert "| Claude | Codex |" in stdout
 
 
 @pytest.mark.parametrize("name,module", [("adoption", adoption), ("workload", workload)])
@@ -283,7 +299,7 @@ def test_legacy_without_sessions_emits_unavailable_not_zero(tmp_path, name, modu
     out = tmp_path / "output"
     assert module.main(["--db", str(db), "-o", str(out)]) == 0
     md = (out / f"{name}.md").read_text(encoding="utf-8")
-    assert "| Lineage unavailable | 1 |" in md
-    assert "## Claude" in md and "## Codex" in md
+    assert "| Sessions with unavailable family links | 1 | 1 |" in md
+    assert "| Claude | Codex |" in md
     assert all(item["value"] == "N/A" for item in json.loads((out / "headline.json").read_text()))
     assert db.read_bytes() == before

@@ -91,69 +91,95 @@ def _share(numerator: int, denominator: int) -> str:
 def render_md(data: dict) -> str:
     blocks = [
         "# Observed subagent adoption\n",
-        "Observed capture, not complete real execution: missing descendants are not evidence of "
-        "no delegation. Unknown-origin root anchors are excluded from matched families. "
-        "Unavailable linkage is not zero adoption; empty statistics are N/A.\n",
+        "These counts describe observed capture, not complete real execution. A main session is "
+        "identified by provider source or file layout. An eligible main is also confirmed as its own "
+        "family root. Linked subagents are sessions traced to that main, including indirect descendants; "
+        "their own origin may be unknown. A family contains one such main and its linked subagents. "
+        "Unknown-origin roots are excluded. Missing links do not prove no delegation.\n",
+        "## Sessions\n",
     ]
+    populations, topology = [], []
     for provider, label in PROVIDERS:
         d = data[provider]
-        blocks.append(f"## {label}\n")
-        blocks.append(md_table.gfm_table(["Population / coverage", "Sessions"], [
-            ["Observed valid session identities", d["observed_sessions"]],
-            ["Known main origins (M0)", d["main_origins"]],
-            ["Known subagent origins (C0)", d["subagent_origins"]],
-            ["Unknown origins (U)", d["unknown_origins"]],
-            ["Eligible resolved self-root mains (M)", d["eligible_mains"]],
-            ["Mains with resolved descendants (F)", d["delegating_mains"]],
-            ["Matched descendants (D)", d["matched_descendants"]],
-            ["All resolved non-self descendants", d["resolved_descendants"]],
-            ["Resolved descendants excluded from matched families", d["excluded_resolved_descendants"]],
-            ["Lineage unavailable", d["unavailable_lineage"]],
+        populations.append([
+            ["Observed sessions", d["observed_sessions"]],
+            ["Main sessions", d["main_origins"]],
+            ["Subagents (linked or not)", d["subagent_origins"]],
+            ["Sessions with unknown origin", d["unknown_origins"]],
+            ["Main sessions with confirmed roots", d["eligible_mains"]],
+            ["Main sessions with subagents", d["delegating_mains"]],
+            ["Subagents in these families", d["matched_descendants"]],
+            ["Linked sessions outside these families", d["excluded_resolved_descendants"]],
+            ["Sessions with unavailable family links", d["unavailable_lineage"]],
+        ])
+        topology.append([
+            ["Nested families", d["nested_families"]],
+            ["Flat families", d["flat_families"]],
+            ["Families with unknown structure", d["unknown_families"]],
+            ["Subagents with a known parent in the family", d["known_parent_edges"]],
+        ])
+    for heading, note, pair in (
+        ("", "Origin comes from provider source or file layout, not incoming links. "
+         "The headline percentage uses main sessions with confirmed roots.", populations),
+        ("Family structure", """These are synthetic examples, not reconstructions of actual data. Each family has **4 sessions: one main + three subagents**. Arrows mean recorded, validated **direct launch links**, not just family membership.
+
+**Flat:** Main directly launched A, B and C. Every subagent's direct parent is known to be Main.
+
+```text
+Main
+├─→ A
+├─→ B
+└─→ C
+```
+
+**Nested:** Main launched A and C; A launched B. One proven subagent-to-subagent launch is enough to establish nesting, even if other parent links are unknown.
+
+```text
+Main
+├─→ A ─→ B
+└─→ C
+```
+
+**Unknown structure:** Main, A, B and C belong to one family, but the direct launch links are insufficient to say flat or nested. The box shows membership only, with no parent arrows. Recorded rounds, tokens and tool calls can still be counted for these members.
+
+```text
+┌─ Family ──────┐
+│ Main  A  B  C │
+└───────────────┘
+```""", topology),
+    ):
+        if heading:
+            blocks.append(f"## {heading}\n")
+        blocks.append(note + "\n")
+        blocks.append(md_table.gfm_table(["Measure", "Claude", "Codex"], [
+            [left[0], left[1], right[1]] for left, right in zip(*pair)
         ]))
-        ratios = [
-            ("Observed adoption (F/M)", d["delegating_mains"], d["eligible_mains"]),
-            ("Main linkage eligibility (M/M0)", d["eligible_mains"], d["main_origins"]),
-            ("Classified subagent share (C0/(M0+C0))", d["subagent_origins"], d["main_origins"] + d["subagent_origins"]),
-            ("Unknown-origin share (U/(M0+C0+U))", d["unknown_origins"], d["observed_sessions"]),
-            ("Matched / all resolved descendants", d["matched_descendants"], d["resolved_descendants"]),
-            ("Validated within-family parent edges / D", d["known_parent_edges"], d["matched_descendants"]),
-            ("Known depth / D", d["depth"]["n"], d["matched_descendants"]),
-            ("Nested / (nested + flat)", d["nested_families"], d["nested_families"] + d["flat_families"]),
-            ("Known topology / F", d["nested_families"] + d["flat_families"], d["delegating_mains"]),
-        ]
-        blocks.append(md_table.gfm_table(["Rate", "Numerator", "Denominator", "Share"], [
-            [name, num, den, _share(num, den)] for name, num, den in ratios
-        ]))
-        blocks.append(md_table.gfm_table(["Observed family topology", "Families"], [
-            ["Nested: validated descendant-to-descendant edge", d["nested_families"]],
-            ["Flat: every matched descendant resolved directly to root", d["flat_families"]],
-            ["Unknown", d["unknown_families"]],
-        ]))
-        distributions = (
-            ("descendants_per_main", "Observed descendants / F main"),
-            ("direct_children_per_main", "Known direct children / F main (including zero known)"),
-            ("depth", "Known descendant depth (root = 0)"),
-        )
-        blocks.append(md_table.gfm_table(["Distribution", "N", "Avg", "P25", "P50", "P90", "P99"], [
-            [name, d[key]["n"]] + [_number(d[key][stat]) for stat in ("avg", "p25", "p50", "p90", "p99")]
-            for key, name in distributions
-        ]))
-    blocks.append(
-        "Direct-child counts include zero *known* children when edges are missing; they are not "
-        "complete child counts. Depth excludes unknown values. Nestedness requires a resolved "
-        "edge between two descendants of the same matched root; root membership alone does not "
-        "establish an edge, depth, or flatness.\n"
-    )
+    blocks += ["## Family size and depth\n",
+               "Each main with subagents counts once. Depth counts only known distances from the main "
+               "(main = 0, direct child = 1, grandchild = 2). "
+               "Zero known children does not prove no children.\n",
+               "Avg is the average; P25/P50/P90/P99 are percentiles, with P50 the median. "
+               "N/A means unavailable, not zero.\n"]
+    for key, heading in (("descendants_per_main", "Subagents per main session"),
+                         ("direct_children_per_main", "Known direct children per main session"),
+                         ("depth", "Subagent depth")):
+        headers = ["Provider"] + (["Count"] if key == "depth" else []) + ["Avg", "P25", "P50", "P90", "P99"]
+        rows = []
+        for provider, label in PROVIDERS:
+            s = data[provider][key]
+            rows.append([label] + ([f"{s['n']:,}"] if key == "depth" else [])
+                        + [_number(s[stat]) for stat in ("avg", "p25", "p50", "p90", "p99")])
+        blocks += [f"### {heading}\n", md_table.gfm_table(headers, rows)]
     return "\n".join(blocks)
 
 
 def render_headline(data: dict) -> list[dict[str, str]]:
     return [
-        {"label": f"{label} observed adoption (F/M)",
+        {"label": f"{label} main sessions with subagents",
          "value": _share(data[provider]["delegating_mains"], data[provider]["eligible_mains"])}
         for provider, label in PROVIDERS
     ] + [
-        {"label": f"{label} descendants / F main", "value": _number(data[provider]["descendants_per_main"]["avg"])}
+        {"label": f"{label} average subagents per main session", "value": _number(data[provider]["descendants_per_main"]["avg"])}
         for provider, label in PROVIDERS
     ]
 

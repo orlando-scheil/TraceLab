@@ -143,6 +143,7 @@ def test_existing_ranking_collapse_and_export_contracts(con, tmp_path):
     latency.write_tool_summary(latency.load_tool_stats(con), tmp_path)
     groups, tools = subagents.load_metrics(con)
     subagents.write_tables(groups, tools, tmp_path)
+    assert "| Error rate | 50% | 0% |" in (tmp_path / "tool_usage.md").read_text()
     with (tmp_path / "tool_usage.csv").open() as fh:
         rows = list(csv.DictReader(fh))
     missing = next(r for r in rows if r["row_type"] == "tool" and r["tool_name"] == "missing")

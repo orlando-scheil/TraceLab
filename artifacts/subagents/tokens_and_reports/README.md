@@ -1,7 +1,14 @@
 # Subagent tokens and reports
 
-Compare **Claude and Codex separately**, using provider-recorded usage only. The
-script writes `tokens_and_reports.md` and `headline.json`; it exports no report
+Compare recorded tokens in a main session and its subagents, together called a **family**. Input totals count repeated context across rounds; output already includes reasoning.
+
+Input changes around subagent replies **are not exact report-token counts**. Claude and Codex record different kinds of reply evidence, explained beside those tables.
+
+**Avg** is the average; P25/P50/P90/P99 are percentiles, with P50 the median. **N/A** means unavailable, not zero.
+
+## Run and outputs
+
+The script writes `tokens_and_reports.md` and `headline.json`. Headline labels identify each provider's median input or output tokens per complete family, using the existing `{label, value}` structure. It exports no report
 bodies, identifiers, per-transition records, or text-derived counts.
 
 ```bash
@@ -14,7 +21,7 @@ uv run python artifacts/subagents/tokens_and_reports/analyze.py -i trace/sample.
 
 1. **How much recorded input do mains and descendants use per family?** Sum
    `input_tokens_total` over each role's retained rounds, then sum the two role
-   totals for the family. Show pooled totals and per-family n/mean/p25/p50/p90/p99.
+   totals for the family. Show pooled totals and separate per-family Avg/P25/P50/P90/P99 columns with provider rows. The complete-family count appears in coverage, not in every distribution.
 2. **How much recorded output does each role use per family?** Apply the same
    calculation to `output_tokens`. Reasoning is already included; never add
    `reasoning_output_tokens` again or substitute child output for a returned report.
@@ -26,18 +33,22 @@ uv run python artifacts/subagents/tokens_and_reports/analyze.py -i trace/sample.
    contributes its first retained round's input, ordered by `round_index` then
    `ingest_seq`, nulls last. A missing/negative first input stays unavailable; it is
    not replaced by a later valid value. Peak is the maximum available nonnegative
-   input. Show session exclusions, valid/retained input rounds, and sessions with
-   incomplete input coverage, whose observed peaks may understate actual peaks.
-5. **What is the Net parent-context change at report-return transitions?** For
-   an evidenced receipt/candidate consumed by a later recipient round, compute
+   input. Each distribution's Sessions column counts available measurements; compare it with the total sessions in coverage to find exclusions. Also show valid/retained input rounds and sessions with incomplete input coverage, whose observed peaks may understate actual peaks.
+5. **What is the input change at a report-associated round?** For
+   a possible or completed reply described under Report evidence and consumed by a later recipient round, compute
    `delta = I_current - I_previous`, using the immediately preceding recipient
-   round, not the spawn/tool-emitting round. Show signed transition distributions.
-6. **What is the Inferred context residual after previous-output deduction?**
+   round, not the spawn/tool-emitting round. Show signed distributions; the Round pairs column counts eligible consecutive round pairs.
+6. **What is the input change after subtracting prior output?**
    Compute `residual = delta - O_previous` only under the existing
    `adjusted_prefix_append` **claude-and-gpt55** policy: Claude, or Codex with model
    exactly `gpt-5.5`. Both inputs and previous output must be positive, with valid
    recorded usage. Other Codex models retain eligible deltas but have unavailable
    residuals. Negative deltas and residuals are never clipped.
+
+In these reference formulas, `I_current` is the consuming recipient round's recorded input,
+`I_previous` is the immediately preceding recipient round's input, and `O_previous` is that
+preceding round's output, including reasoning. `delta` is the input difference;
+`residual` is that difference after subtracting prior output. Neither isolates report content.
 
 **Exact report-only token counts are not identifiable from retained usage.** The
 last two metrics are derived from recorded usage, not report-body token counts.
@@ -48,9 +59,11 @@ or characters-to-tokens estimate is used.
 ## Cohort, denominators, and missing values
 
 Use the shared `subagent_cohorts.COHORT_SQL`: positively known delegating mains
-with resolved self-roots and their resolved descendants. Unknown/unresolved
-families are not silently promoted to mains. A family is a provider/root pair;
+with resolved self-roots and their resolved descendants. Unknown-origin root anchors and unresolved
+families are not silently promoted to mains; a linked descendant may itself have unknown origin. A family is a provider/root pair;
 all metrics and headline entries remain provider-specific.
+
+Main origin comes from provider source or file layout, not incoming links. Each main must be confirmed as its own root and have at least one linked subagent. Descendants include subagents launched through other subagents. One recorded round is one retained LLM row, not a user request.
 
 Rounds retain their surrogate `round_pk`; duplicate source IDs or round indices
 are **not** deduplicated for usage totals. Tools are not joined into those sums,

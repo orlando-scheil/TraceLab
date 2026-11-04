@@ -95,10 +95,34 @@ def test_both_providers_consume_later_and_do_not_count_reasoning_twice(collect):
         assert usage["input_tokens_total"]["descendant_majority_fraction"] == 1
     page = tokens.render_md(stats)
     assert tokens.DELTA_LABEL in page and tokens.RESIDUAL_LABEL in page
-    assert "Exact report-only token counts are not identifiable" in page
-    assert "Claude — candidate only" in page and "Codex — supported wait receipt" in page
+    assert "input changes, not exact report-token counts" in page
+    assert "Possible replies (Agent/Task)" in page and "Completed replies recorded by wait" in page
+    assert "round receiving a reply with the preceding round in the same session" in page
+    assert "The receiving session may be a main or a subagent" in page
+    assert "not equivalent report counts" in page
+    assert "Missing evidence does not prove no replies" in page
+    assert "| Families where subagents use more tokens than the main | 1 (100.0%) | 1 (100.0%) |" in page
+    assert tokens.render_headline(stats) == [
+        {"label": f"{provider} median {metric} tokens per complete family", "value": value}
+        for provider in ("Claude", "Codex") for metric, value in (("input", "6,600"), ("output", "225"))
+    ]
     assert "claude:root" not in page and "return" not in json.dumps(tokens.render_headline(stats))
     assert {entry["label"].split()[0] for entry in tokens.render_headline(stats)} == {"Claude", "Codex"}
+    assert page.count("| Provider | Avg | P25 | P50 | P90 | P99 |") == 6
+    assert page.count("| Provider | Sessions | Avg | P25 | P50 | P90 | P99 |") == 4
+    assert page.count("| Provider | Round pairs | Avg | P25 | P50 | P90 | P99 |") == 4
+    assert "| Claude | 1 | 400 | 400 | 400 | 400 | 400 |" in page
+    assert "<br>" not in page and "; mean" not in page
+
+
+def test_display_keeps_provider_columns_and_missing_statistics(collect):
+    page = tokens.render_md(collect(family("claude")))
+    assert "| Measure | Claude | Codex |" in page
+    assert "| Whole families — total tokens | 6,600 | N/A |" in page
+    assert "| Captured evidence | Evidence available | No report evidence |" in page
+    assert "| Codex | 0 | N/A | N/A | N/A | N/A | N/A |" in page
+    assert "| Families with complete usage | 1 | 0 |" in page
+    assert "<br>" not in page and "; mean" not in page
 
 
 @pytest.mark.parametrize("provider", ["claude", "codex"])
@@ -265,7 +289,7 @@ def test_unavailable_timeline_keeps_receipt_but_no_metric(collect, case):
     assert report["coverage"]["evidence_entries"] == 1
     assert report["coverage"]["unavailable_consumption_timing"] == 1
     assert report["delta"]["avg"] is report["residual"]["avg"] is None
-    assert "Unavailable consumption timing" in tokens.render_md(stats)
+    assert "| Missing timing |" in tokens.render_md(stats)
 
 
 @pytest.mark.parametrize("field", ["emission", "arrival", "output"])
