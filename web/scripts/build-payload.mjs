@@ -123,6 +123,7 @@ const HEADLINE_SLUGS = [
   'subagents/adoption',
   'subagents/workload',
   'subagents/tokens_and_reports',
+  'subagents/timing',
   'prefix_cache/redundant_prefill',
   'prefix_cache/human_idle_cache_counterfactual',
   'llm_generation/token_length_distribution',

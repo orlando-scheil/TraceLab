@@ -631,8 +631,8 @@ def plot_long_tail_imbalance(rows: list[dict[str, Any]], output_dir: Path) -> Pa
     )
 
     left_label_x = 0.018
-    bar_x = 0.125
-    bar_w = 0.855
+    bar_x = 0.18
+    bar_w = 0.80
     bar_h = 0.175
     row_specs = [
         ("Share of\ntool calls", "call_share", 0.62),

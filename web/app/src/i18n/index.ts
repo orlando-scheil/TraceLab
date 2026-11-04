@@ -133,7 +133,7 @@ export const uiCopy = {
         },
         subagents: {
           title: 'Subagents',
-          description: 'Claude and Codex subagent adoption, workload, tokens, and tools, with coverage and missing evidence shown.',
+          description: 'Compare recorded subagent use, workload, tokens, tools, and timing in Claude and Codex, with missing data kept visible.',
         },
       },
       cards: {} as Record<string, { title: string; blurb: string }>,
@@ -743,25 +743,29 @@ export const uiCopy = {
         },
         subagents: {
           title: '子智能体',
-          description: '比较 Claude 与 Codex 子智能体的使用、工作负载、token 和工具，并展示覆盖范围与缺失证据。',
+          description: '比较 Claude 与 Codex 记录的子智能体使用、工作负载、token、工具和耗时，并明确展示缺失数据。',
         },
       },
       cards: {
         'Subagent adoption': {
           title: '子智能体使用情况',
-          blurb: '比较 Claude 与 Codex 中观测到的委派、会话家族规模、嵌套和关联覆盖范围。',
+          blurb: '主会话有多常关联到子智能体、关联多少个，以及记录的关系能说明什么。',
         },
         'Subagent workload': {
           title: '子智能体工作负载',
-          blurb: '比较 Claude 与 Codex 中配对的主会话和后代会话的轮次及工具调用。',
+          blurb: '主会话及其关联子智能体中记录的模型轮次与工具调用。',
         },
         'Subagent tokens and reports': {
           title: '子智能体 token 与报告',
-          blurb: '比较 Claude 与 Codex 记录的输入和输出，以及与报告相关的上下文变化，并展示证据覆盖范围。',
+          blurb: '主会话和关联子智能体记录的 token，以及可能的子智能体回复或已完成回复前后的输入变化。',
         },
         'Subagent tool usage': {
           title: '子智能体工具使用',
-          blurb: '比较 Claude 与 Codex 的工具调用构成、已知结果错误率、工具种类数和累加工具耗时。',
+          blurb: '主会话和关联子智能体使用的工具，以及错误、未知结果和累加调用耗时。',
+        },
+        'Subagent timing': {
+          title: '子智能体耗时',
+          blurb: '记录的经过时间，以及有工具调用尚未返回结果的时间占比。',
         },
         'Tool latency distribution': {
           title: '工具延迟分布',
@@ -934,6 +938,12 @@ export const uiCopy = {
         },
       },
       captions: {
+        'Elapsed time, time with tool calls outstanding, and per-subagent tool share, by provider.': '按提供方展示经过时间、工具调用尚未返回结果的时间，以及每个子智能体的工具时间占比。',
+        'Session counts, family size, and depth, with missing links shown for Claude and Codex.': 'Claude 与 Codex 的会话数、家族规模和深度，并标明缺失的关联。',
+        'Rounds and tool calls per session and per round, including zero-call and one-round sessions, with coverage for each group.': '每个会话的轮次与工具调用、每轮工具调用，包括零调用和单轮会话，并展示各组数据覆盖情况。',
+        'Token totals, first and peak input, and input changes around subagent replies. Claude shows possible replies; Codex shows completed replies recorded by wait. Neither measures report-body tokens.': 'token 总量、首次及峰值输入，以及子智能体回复前后的输入变化。Claude 展示可能的回复；Codex 展示 wait 工具记录的已完成回复。两者都不能衡量报告正文的 token 数。',
+        'Main and linked-subagent tool use for the same displayed tool list. Time sums positive call latencies, not elapsed runtime; missing linked data is labeled.': '用同一工具列表展示主会话和关联子智能体的工具使用。耗时为正调用延迟之和，不是实际经过时间；缺失关联数据会明确标注。',
+        'Main-session and subagent summaries: call counts, errors among known outcomes, outcome and timing coverage, distinct tools per session, and summed positive call time.': '主会话和子智能体汇总：调用数、已知结果中的错误、结果与耗时覆盖情况、每个会话的工具种类数，以及正调用耗时之和。',
         'Per-session, per-request, and per-step counts (avg / p25 / p50 / p90 / p99).':
           '按会话、按请求、按步骤的计数（avg / p25 / p50 / p90 / p99）。',
         'Same-session context change by step trigger: per-step change in total input length (prefix + append tokens) versus the previous step in the session, split into growth and reduction bands.':

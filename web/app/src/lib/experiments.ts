@@ -127,13 +127,13 @@ export const experiments: Experiment[] = [
     slug: 'subagents/adoption',
     category: 'subagents',
     title: 'Subagent adoption',
-    blurb: 'Claude vs Codex observed delegation, family size, nesting, and linkage coverage.',
+    blurb: 'How often main sessions have linked subagents, how many, and what the recorded links reveal.',
     readme: 'artifacts/subagents/adoption/README.md',
     figures: [],
     tables: [
       {
         src: 'artifacts/subagents/adoption/adoption.md',
-        caption: 'Claude and Codex observed adoption, descendants, direct children, nesting, and depth, with eligibility and linkage coverage.',
+        caption: 'Session counts, family size, and depth, with missing links shown for Claude and Codex.',
       },
     ],
   },
@@ -141,13 +141,13 @@ export const experiments: Experiment[] = [
     slug: 'subagents/workload',
     category: 'subagents',
     title: 'Subagent workload',
-    blurb: 'Claude vs Codex rounds and tool calls in matched main and descendant sessions.',
+    blurb: 'Recorded rounds and tool calls in main sessions and their subagents.',
     readme: 'artifacts/subagents/workload/README.md',
     figures: [],
     tables: [
       {
         src: 'artifacts/subagents/workload/workload.md',
-        caption: 'Claude and Codex main/descendant rounds and tool calls per session, zero-tool and one-round shares, and calls per round, with cohort coverage.',
+        caption: 'Rounds and tool calls per session and per round, including zero-call and one-round sessions, with coverage for each group.',
       },
     ],
   },
@@ -155,13 +155,13 @@ export const experiments: Experiment[] = [
     slug: 'subagents/tokens_and_reports',
     category: 'subagents',
     title: 'Subagent tokens and reports',
-    blurb: 'Claude vs Codex recorded input/output and report-associated context changes, with evidence coverage.',
+    blurb: 'Recorded tokens in main sessions and linked subagents, plus input changes around possible or completed subagent replies.',
     readme: 'artifacts/subagents/tokens_and_reports/README.md',
     figures: [],
     tables: [
       {
         src: 'artifacts/subagents/tokens_and_reports/tokens_and_reports.md',
-        caption: 'Claude and Codex recorded input/output, first and peak input, and report-associated context changes. Claude candidates and supported Codex receipts stay separate; these are not exact report-body token counts.',
+        caption: 'Token totals, first and peak input, and input changes around subagent replies. Claude shows possible replies; Codex shows completed replies recorded by wait. Neither measures report-body tokens.',
       },
     ],
   },
@@ -169,18 +169,33 @@ export const experiments: Experiment[] = [
     slug: 'subagents/tool_usage',
     category: 'subagents',
     title: 'Subagent tool usage',
-    blurb: 'Claude vs Codex tool mix, known-outcome errors, diversity, and additive tool time.',
+    blurb: 'Tools used by main sessions and linked subagents, with errors, missing outcomes, and summed call time.',
     readme: 'artifacts/subagents/tool_usage/README.md',
     figures: [
       {
         src: '/figures/subagents/tool_usage.png',
-        caption: 'Claude and Codex main/descendant call shares and positive effective tool time for a shared tool list. Time is additive, not elapsed; missing linked data is labeled.',
+        caption: 'Main and linked-subagent tool use for the same displayed tool list. Time sums positive call latencies, not elapsed runtime; missing linked data is labeled.',
       },
     ],
     tables: [
       {
         src: 'artifacts/subagents/tool_usage/tool_usage.md',
-        caption: 'Claude and Codex complete tool counts, known-outcome error rates and coverage, distinct named tools per session, and additive positive tool time, by role.',
+        caption: 'Main-session and subagent summaries: call counts, errors among known outcomes, outcome and timing coverage, distinct tools per session, and summed positive call time.',
+      },
+    ],
+  },
+
+  {
+    slug: 'subagents/timing',
+    category: 'subagents',
+    title: 'Subagent timing',
+    blurb: 'Recorded elapsed time and the share spent with tool calls outstanding.',
+    readme: 'artifacts/subagents/timing/README.md',
+    figures: [],
+    tables: [
+      {
+        src: 'artifacts/subagents/timing/timing.md',
+        caption: 'Elapsed time, time with tool calls outstanding, and per-subagent tool share, by provider.',
       },
     ],
   },
