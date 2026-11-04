@@ -357,7 +357,7 @@ def test_raw_codex_consumption_order_through_sanitizer_and_database(tmp_path, co
         usage(10, 1, 1000, 800, 100),
         *([output, arrival] if late else [arrival, output]),
         usage(20, 2, 1400, 1000, 50),
-        # A genuinely later round must not become a heuristic replacement consumer.
+        # A later round consumes the report only when the boundary router carries its result there.
         native("response_item", 21, type="message", role="assistant", content=[]),
         usage(30, 3, 1600, 1400, 25),
     ]
@@ -372,8 +372,11 @@ def test_raw_codex_consumption_order_through_sanitizer_and_database(tmp_path, co
         path = tmp_path / f"{name}.jsonl"
         path.write_text("".join(json.dumps(record) + "\n" for record in records))
         normalized.extend(extract_codex_session(path))
-    events = normalized[1]["timing_events"]
+    consumer_index = 2 if late else 1
+    events = normalized[consumer_index]["timing_events"]
     assert [event["event_type"] for event in events[:2]] == ["tool_result", "text"]
+    if late:
+        assert [event["event_type"] for event in normalized[1]["timing_events"]] == ["text", "usage_report"]
     assert normalized[0]["tools"][0]["report_source"] == "codex_wait_completed"
     assert "PRIVATE_REPORT_SENTINEL" not in json.dumps(normalized)
     ids = StableIdSanitizer("gate2")
@@ -382,10 +385,6 @@ def test_raw_codex_consumption_order_through_sanitizer_and_database(tmp_path, co
     assert safe[-1]["parent_session_id"] == safe[0]["session_id"]
     report = collect(safe)["reports"]["codex"]["main"]
     assert report["coverage"]["evidence_entries"] == 1
-    if late:
-        assert report["coverage"]["report_after_model_output"] == 1
-        assert report["coverage"]["consuming_transitions"] == 0
-        assert report["delta"]["avg"] is report["residual"]["avg"] is None
-    else:
-        assert report["coverage"]["consuming_transitions"] == 1
-        assert report["delta"]["avg"] == 400 and report["residual"]["avg"] == 300
+    assert report["coverage"]["consuming_transitions"] == 1
+    assert report["delta"]["avg"] == (200 if late else 400)
+    assert report["residual"]["avg"] == (150 if late else 300)

@@ -70,7 +70,7 @@ def codex_records(outputs, *, name="wait", consume=True, output_call="call_wait"
     }, 12 + index) for index, output in enumerate(outputs))
     if consume:
         rows.extend([
-            record("turn_context", {"turn_id": "turn-2", "model": "gpt-5.5"}, 19),
+            record("turn_context", {"turn_id": "turn-1", "model": "gpt-5.5"}, 19),
             record("response_item", {"type": "message", "role": "assistant", "content": []}, 19),
             usage(2),
         ])
@@ -129,6 +129,29 @@ def test_codex_receipt_owner_consumer_and_sanitized_child_link(tmp_path, consume
             JOIN rounds consumer ON consumer.round_pk = e.round_pk AND consumer.session_id = owner.session_id
             WHERE t.report_source = 'codex_wait_completed'
         """).fetchall() == ([(safe[0]["session_id"], 1)] if consume else [])
+
+
+def test_codex_receipt_survives_turn_change_without_a_consuming_round(tmp_path):
+    records = codex_records([completed(CHILD)])
+    records[-3]["payload"]["turn_id"] = "turn-2"
+    rows = extract_codex_session(write(tmp_path / "codex.jsonl", records))
+    assert len(rows) == 2
+    wait = rows[0]["tools"][1]
+    assert wait["report_source"] == "codex_wait_completed"
+    assert wait["report_session_ids"] == [f"codex:{CHILD}"]
+    assert wait["result_at"] == "2026-01-01T00:00:12Z"
+    assert not any(event["event_type"] == "tool_result"
+                   for row in rows for event in row["timing_events"])
+    assert PRIVATE not in json.dumps(rows)
+
+    ids = StableIdSanitizer("cross-turn-receipt")
+    safe = [sanitize_row(row, ids) for row in rows]
+    db = materialize(write(tmp_path / "safe.jsonl", safe), tmp_path / "reports.duckdb")
+    with connect(db) as con:
+        assert con.execute("SELECT report_source, report_session_ids FROM tool_calls WHERE report_source IS NOT NULL").fetchall() == [
+            ("codex_wait_completed", safe[0]["tools"][1]["report_session_ids"]),
+        ]
+        assert con.execute("SELECT count(*) FROM timing_events WHERE event_type = 'tool_result'").fetchone() == (0,)
 
 
 @pytest.mark.parametrize("output", [
